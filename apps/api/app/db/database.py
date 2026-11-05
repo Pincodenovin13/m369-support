@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -47,6 +47,28 @@ class Base(DeclarativeBase):
     """Declarative base for all SQLAlchemy models."""
 
     pass
+
+
+# ---------------------------------------------------------------------------
+# RLS GUC persistence: re-issue SET LOCAL app.tenant_id at every txn begin
+# ---------------------------------------------------------------------------
+
+
+TENANT_GUC = "app.tenant_id"
+
+
+@event.listens_for(Session, "after_begin")
+def _reissue_tenant_guc_on_txn_begin(session: Session, transaction: Any, connection: Any) -> None:
+    """After a new transaction starts, re-apply the tenant GUC if set.
+
+    ``SET LOCAL`` only lasts for the current transaction. After commit /
+    rollback the GUC is gone. This listener restores it from
+    ``session.info`` so subsequent SELECTs (e.g. ``db.refresh``) hit RLS
+    with the correct tenant context.
+    """
+    tenant_id = session.info.get("tenant_id")
+    if tenant_id is not None:
+        connection.execute(text(f"SET LOCAL {TENANT_GUC} = '{tenant_id}'"))
 
 
 def get_db() -> Iterator[Session]:

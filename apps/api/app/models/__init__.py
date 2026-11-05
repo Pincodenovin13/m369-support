@@ -35,7 +35,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db.database import Base
@@ -412,9 +412,9 @@ class AuditLog(Base):
     target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
-        Text,
-        default="{}",
-        server_default="{}",
+        JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
     )
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -440,7 +440,10 @@ class SuperAdminAuditLog(Base):
     target_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
     target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     metadata_: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", Text, default="{}", server_default="{}"
+        "metadata",
+        JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
     )
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -464,4 +467,32 @@ __all__ = [
     "TimestampMixin",
     "new_uuid",
     "now_utc",
+    # Phase 1 extended (migration 0006)
+    "Message",
+    "MessageAttachment",
+    "Channel",
+    "KBCategory",
+    "KBArticle",
+    "CannedResponse",
+    "Plan",
+    "Subscription",
+    "Payment",
+    "PlatformSetting",
+    "AgencyNote",
 ]
+
+
+# Re-export Phase 1 extended models so callers can `from app.models import Message, ...`
+from .phase1_extended import (  # noqa: E402
+    AgencyNote,
+    Channel,
+    CannedResponse,
+    KBArticle,
+    KBCategory,
+    Message,
+    MessageAttachment,
+    Payment,
+    Plan,
+    PlatformSetting,
+    Subscription,
+)

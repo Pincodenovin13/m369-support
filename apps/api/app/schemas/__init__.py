@@ -1,4 +1,12 @@
-"""Pydantic schemas for API request/response validation."""
+"""Pydantic schemas for M369 Support API.
+
+Modules:
+    - common           : PaginationParams, PaginatedResponse[T]
+    - conversations     : Contact, Conversation, Message schemas
+    - teams             : Team schemas
+    - channels_kb       : Channel, KBCategory, KBArticle, CannedResponse
+    - audit             : AuditLogOut
+"""
 from __future__ import annotations
 
 import uuid
@@ -8,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 # ---------------------------------------------------------------------------
-# Auth
+# Auth / agency / workspace / super-admin / health (legacy — kept inline)
 # ---------------------------------------------------------------------------
 
 
@@ -41,11 +49,6 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
-# ---------------------------------------------------------------------------
-# User / Membership
-# ---------------------------------------------------------------------------
-
-
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -65,11 +68,6 @@ class MembershipOut(BaseModel):
 
 class UserWithMembershipsOut(UserOut):
     memberships: list[MembershipOut] = []
-
-
-# ---------------------------------------------------------------------------
-# Agency / Workspace
-# ---------------------------------------------------------------------------
 
 
 class AgencyOut(BaseModel):
@@ -101,11 +99,6 @@ class WorkspaceOut(BaseModel):
     created_at: datetime
 
 
-# ---------------------------------------------------------------------------
-# Super Admin
-# ---------------------------------------------------------------------------
-
-
 class SuperAdminCreate(BaseModel):
     email: EmailStr
     name: str = Field(min_length=1, max_length=160)
@@ -127,11 +120,6 @@ class SuperAdminOut(BaseModel):
     is_active: bool
 
 
-# ---------------------------------------------------------------------------
-# Health
-# ---------------------------------------------------------------------------
-
-
 class HealthResponse(BaseModel):
     status: str = "ok"
     version: str
@@ -141,3 +129,88 @@ class HealthResponse(BaseModel):
 class ReadinessResponse(BaseModel):
     status: str
     database: str
+
+
+# ---------------------------------------------------------------------------
+# Re-exports from feature modules
+# ---------------------------------------------------------------------------
+
+from .common import DEFAULT_LIMIT, MAX_LIMIT, PaginatedResponse, PaginationParams
+from .conversations import (
+    ContactCreate,
+    ContactOut,
+    ContactUpdate,
+    ConversationCreate,
+    ConversationOut,
+    ConversationUpdate,
+    MessageCreate,
+    MessageOut,
+)
+from .teams import TeamCreate, TeamMembershipAdd, TeamMembershipOut, TeamOut
+from .channels_kb import (
+    CannedResponseCreate,
+    CannedResponseOut,
+    CannedResponseUpdate,
+    ChannelCreate,
+    ChannelOut,
+    ChannelUpdate,
+    KBArticleCreate,
+    KBArticleOut,
+    KBArticleUpdate,
+    KBCategoryCreate,
+    KBCategoryOut,
+)
+from .audit import AuditLogOut
+
+
+__all__ = [
+    # Auth / agency / workspace / super admin / health
+    "RegisterRequest",
+    "LoginRequest",
+    "TokenResponse",
+    "RefreshRequest",
+    "UserOut",
+    "MembershipOut",
+    "UserWithMembershipsOut",
+    "AgencyOut",
+    "WorkspaceCreate",
+    "WorkspaceOut",
+    "SuperAdminCreate",
+    "SuperAdminLoginRequest",
+    "SuperAdminOut",
+    "HealthResponse",
+    "ReadinessResponse",
+    # Common
+    "PaginationParams",
+    "PaginatedResponse",
+    "DEFAULT_LIMIT",
+    "MAX_LIMIT",
+    # Contacts / conversations / messages
+    "ContactCreate",
+    "ContactUpdate",
+    "ContactOut",
+    "ConversationCreate",
+    "ConversationUpdate",
+    "ConversationOut",
+    "MessageCreate",
+    "MessageOut",
+    # Teams
+    "TeamCreate",
+    "TeamOut",
+    "TeamMembershipOut",
+    "TeamMembershipAdd",
+    # Channels / KB / canned
+    "ChannelCreate",
+    "ChannelUpdate",
+    "ChannelOut",
+    "KBCategoryCreate",
+    "KBCategoryOut",
+    "KBArticleCreate",
+    "KBArticleUpdate",
+    "KBArticleOut",
+    "CannedResponseCreate",
+    "CannedResponseUpdate",
+    "CannedResponseOut",
+    # Audit
+    "AuditLogOut",
+]

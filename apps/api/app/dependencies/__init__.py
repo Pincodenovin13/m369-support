@@ -81,8 +81,11 @@ def get_current_user(
     user = db.get(User, ctx.user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
-    # Set tenant context on the DB session so RLS policies filter automatically
+    # Set tenant context on the DB session so RLS policies filter automatically.
+    # We also stash it in session.info so the after_begin event listener can
+    # re-issue SET LOCAL after every commit/rollback (RLS GUC persistence).
     if ctx.agency_id is not None:
+        db.info["tenant_id"] = str(ctx.agency_id)
         db.execute(text(f"SET LOCAL app.tenant_id = '{ctx.agency_id}'"))
     return user
 

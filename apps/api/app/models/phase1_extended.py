@@ -49,7 +49,7 @@ from . import Agency, AgencyMembership, Contact, Conversation, Team, User, Works
 # ---------------------------------------------------------------------------
 
 
-class Message(TimestampMixin, AgencyOwnedMixin):
+class Message(Base, TimestampMixin, AgencyOwnedMixin):
     """A single message in a conversation.
 
     Owned by agency (via agency_id) and linked to a conversation.
@@ -92,7 +92,7 @@ class Message(TimestampMixin, AgencyOwnedMixin):
     )
 
 
-class MessageAttachment(TimestampMixin):
+class MessageAttachment(Base, TimestampMixin):
     """A file attached to a message.
 
     Owned transitively via message → conversation → agency.
@@ -116,7 +116,7 @@ class MessageAttachment(TimestampMixin):
 # ---------------------------------------------------------------------------
 
 
-class Channel(AgencyOwnedMixin, TimestampMixin):
+class Channel(Base, AgencyOwnedMixin, TimestampMixin):
     """Channel configuration per workspace (widget, email, etc.).
 
     Phase 1 supports 'widget' only. Future phases add email, WhatsApp, etc.
@@ -147,7 +147,7 @@ class Channel(AgencyOwnedMixin, TimestampMixin):
 # ---------------------------------------------------------------------------
 
 
-class KBCategory(AgencyOwnedMixin, TimestampMixin):
+class KBCategory(Base, AgencyOwnedMixin, TimestampMixin):
     """KB article category, scoped to workspace."""
 
     __tablename__ = "kb_categories"
@@ -164,7 +164,7 @@ class KBCategory(AgencyOwnedMixin, TimestampMixin):
     )
 
 
-class KBArticle(AgencyOwnedMixin, TimestampMixin):
+class KBArticle(Base, AgencyOwnedMixin, TimestampMixin):
     """KB article, scoped to workspace."""
 
     __tablename__ = "kb_articles"
@@ -193,7 +193,7 @@ class KBArticle(AgencyOwnedMixin, TimestampMixin):
 # ---------------------------------------------------------------------------
 
 
-class CannedResponse(AgencyOwnedMixin, TimestampMixin):
+class CannedResponse(Base, AgencyOwnedMixin, TimestampMixin):
     """Pre-written reply, scoped to workspace."""
 
     __tablename__ = "canned_responses"

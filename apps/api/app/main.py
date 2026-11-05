@@ -4,7 +4,21 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api.v1 import agencies, auth, health, super_admin, workspaces
+from .api.v1 import (
+    agencies,
+    audit_logs,
+    auth,
+    canned_responses,
+    channels,
+    contacts,
+    conversations,
+    health,
+    kb,
+    messages,
+    super_admin,
+    teams,
+    workspaces,
+)
 from .core.config import get_settings
 from .middleware.tenant_context import TenantContextMiddleware
 
@@ -41,6 +55,14 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(agencies.router, prefix="/api/v1")
     app.include_router(workspaces.router, prefix="/api/v1")
+    app.include_router(contacts.router, prefix="/api/v1")
+    app.include_router(conversations.router, prefix="/api/v1")
+    app.include_router(messages.router, prefix="/api/v1")
+    app.include_router(teams.router, prefix="/api/v1")
+    app.include_router(channels.router, prefix="/api/v1")
+    app.include_router(kb.router, prefix="/api/v1")
+    app.include_router(canned_responses.router, prefix="/api/v1")
+    app.include_router(audit_logs.router, prefix="/api/v1")
     app.include_router(super_admin.auth.router, prefix="/api/v1")
 
     @app.get("/health", tags=["System"])

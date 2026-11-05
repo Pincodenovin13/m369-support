@@ -141,7 +141,11 @@ def setup_session(db_engine) -> Iterator[Session]:
         # Truncate ALL tables for next test (use setup connection as superuser)
         with setup_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
             c.exec_driver_sql(
-                "TRUNCATE TABLE audit_logs, conversations, contacts, "
+                "TRUNCATE TABLE "
+                "agency_notes, platform_settings, payments, subscriptions, plans, "
+                "canned_responses, kb_articles, kb_categories, channels, "
+                "message_attachments, messages, "
+                "audit_logs, conversations, contacts, "
                 "team_memberships, teams, agency_memberships, users, "
                 "workspaces, agencies, super_admins, super_admin_audit_logs "
                 "RESTART IDENTITY CASCADE"
