@@ -6,7 +6,7 @@ All tests use real PostgreSQL with real seeded data.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import psycopg
 import pytest
@@ -206,9 +206,30 @@ def test_refresh_cannot_switch_agency(client: TestClient, setup_session: Session
 
 
 def test_refresh_rejects_wrong_scope(client: TestClient, setup_session: Session):
-    """Super Admin refresh token must not work on /auth/refresh (agency scope)."""
-    sa_refresh = create_refresh_token(subject=str(uuid.uuid4()), token_type="super_admin")
-    r = client.post("/api/v1/auth/refresh", json={"refresh_token": sa_refresh})
+    """A token with scope != 'agency' must not work on /auth/refresh.
+
+    create_refresh_token now rejects token_type='super_admin' with ValueError.
+    We craft a token manually with scope='super_admin' to simulate an
+    attacker who bypasses the function and signs with the wrong key.
+    The refresh endpoint must reject it because the scope doesn't match.
+    """
+    import jwt as pyjwt
+    from app.core.config import get_settings
+    s = get_settings()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(uuid.uuid4()),
+        "type": "refresh",
+        "exp": int((now + timedelta(days=30)).timestamp()),
+        "iat": int(now.timestamp()),
+        "iss": s.jwt_issuer,
+        "aud": s.jwt_audience,
+        "jti": uuid.uuid4().hex,
+        "scope": "super_admin",  # Wrong scope — should be rejected
+    }
+    # Sign with super_admin key (different from agency key)
+    bad_token = pyjwt.encode(payload, s.jwt_super_admin_secret_key, algorithm=s.jwt_algorithm)
+    r = client.post("/api/v1/auth/refresh", json={"refresh_token": bad_token})
     assert r.status_code == 401, f"Expected 401, got {r.status_code}: {r.text}"
 
 
@@ -222,7 +243,7 @@ def test_refresh_rejects_token_without_agency_id(client: TestClient, setup_sessi
     payload = {
         "sub": str(uuid.uuid4()),
         "type": "refresh",
-        "exp": int((now + __import__("datetime").timedelta(days=30)).timestamp()),
+        "exp": int((now + timedelta(days=30)).timestamp()),
         "iat": int(now.timestamp()),
         "iss": s.jwt_issuer,
         "aud": s.jwt_audience,
@@ -245,7 +266,7 @@ def test_refresh_rejects_invalid_agency_id(client: TestClient, setup_session: Se
     payload = {
         "sub": str(uuid.uuid4()),
         "type": "refresh",
-        "exp": int((now + __import__("datetime").timedelta(days=30)).timestamp()),
+        "exp": int((now + timedelta(days=30)).timestamp()),
         "iat": int(now.timestamp()),
         "iss": s.jwt_issuer,
         "aud": s.jwt_audience,
@@ -525,60 +546,72 @@ def test_login_helper_function_owner_is_least_privilege(db_engine):
 
 
 def test_m369_app_is_not_member_of_login_reader(db_engine):
-    """m369_app must NOT be a member of m369_login_reader — cannot SET ROLE."""
+    """NO role must be a member of m369_login_reader — not just m369_app."""
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT r.rolname
+                SELECT r.rolname as member_name
                 FROM pg_auth_members m
                 JOIN pg_roles r ON r.oid = m.member
                 JOIN pg_roles parent ON parent.oid = m.roleid
                 WHERE parent.rolname = 'm369_login_reader'
-                  AND r.rolname = 'm369_app'
             """)
-            row = cur.fetchone()
-            assert row is None, (
-                f"m369_app is a member of m369_login_reader — "
-                f"runtime role can SET ROLE to escalate"
+            members = cur.fetchall()
+            assert len(members) == 0, (
+                f"m369_login_reader has members: {[m[0] for m in members]} — "
+                f"no role should be a member (prevents SET ROLE escalation)"
             )
     finally:
         conn.close()
 
 
 def test_login_reader_has_only_select_on_required_tables(db_engine):
-    """m369_login_reader must have SELECT only on agency_memberships and agencies."""
+    """m369_login_reader must have SELECT only on agency_memberships and agencies.
+
+    Checks ALL tables in schema public — not just a few.
+    Also checks NO INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER on any table.
+    """
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
         with conn.cursor() as cur:
-            # Check SELECT on the two required tables
-            for table in ["agency_memberships", "agencies"]:
+            # Get ALL table names in public schema
+            cur.execute("""
+                SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+            """)
+            all_tables = [r[0] for r in cur.fetchall()]
+            assert len(all_tables) > 0, "No tables found in public schema — migration may have failed"
+
+            allowed_select_tables = {"agency_memberships", "agencies"}
+            all_privs = ["INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"]
+
+            for table in all_tables:
+                # SELECT check
                 cur.execute(
                     "SELECT has_table_privilege('m369_login_reader', %s, 'SELECT')",
                     (table,),
                 )
-                assert cur.fetchone()[0], f"m369_login_reader lacks SELECT on {table}"
+                has_select = cur.fetchone()[0]
+                if table in allowed_select_tables:
+                    assert has_select, (
+                        f"m369_login_reader should have SELECT on {table} but does not"
+                    )
+                else:
+                    assert not has_select, (
+                        f"m369_login_reader has SELECT on {table} — should not have access"
+                    )
 
-            # Check NO INSERT/UPDATE/DELETE on those tables
-            for table in ["agency_memberships", "agencies"]:
-                for priv in ["INSERT", "UPDATE", "DELETE"]:
+                # Check all non-SELECT privileges on ALL tables
+                for priv in all_privs:
                     cur.execute(
                         "SELECT has_table_privilege('m369_login_reader', %s, %s)",
                         (table, priv),
                     )
-                    assert not cur.fetchone()[0], (
-                        f"m369_login_reader has {priv} on {table} — should only have SELECT"
+                    has_priv = cur.fetchone()[0]
+                    assert not has_priv, (
+                        f"m369_login_reader has {priv} on {table} — "
+                        f"should have NO privileges other than SELECT on agency_memberships and agencies"
                     )
-
-            # Check NO access to other tenant tables
-            for table in ["workspaces", "contacts", "conversations", "audit_logs", "teams", "team_memberships"]:
-                cur.execute(
-                    "SELECT has_table_privilege('m369_login_reader', %s, 'SELECT')",
-                    (table,),
-                )
-                assert not cur.fetchone()[0], (
-                    f"m369_login_reader has SELECT on {table} — should not have access"
-                )
     finally:
         conn.close()
 

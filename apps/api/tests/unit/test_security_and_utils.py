@@ -7,7 +7,9 @@ import pytest
 
 from app.security import (
     create_access_token,
+    create_refresh_token,
     decode_access_token,
+    decode_refresh_token,
     decode_super_admin_token,
     hash_password,
     verify_password,
@@ -67,3 +69,33 @@ def test_slugify_unicode():
     assert slugify("سلام دنیا") == "agency"
     assert slugify("日本語") == "agency"
     assert slugify("Café 2026") == "cafe-2026"
+
+
+# ---------------------------------------------------------------------------
+# Refresh token — create_refresh_token tests
+# ---------------------------------------------------------------------------
+
+
+def test_create_agency_refresh_token_with_valid_agency_id():
+    """create_refresh_token with agency_id succeeds and produces a decodable token."""
+    user_id = str(uuid.uuid4())
+    agency_id = str(uuid.uuid4())
+    token = create_refresh_token(subject=user_id, token_type="agency", agency_id=agency_id)
+    decoded = decode_refresh_token(token, expected_scope="agency")
+    assert decoded is not None
+    assert decoded["sub"] == user_id
+    assert decoded["scope"] == "agency"
+    assert decoded["agency_id"] == agency_id
+    assert decoded["type"] == "refresh"
+
+
+def test_create_refresh_token_rejects_super_admin():
+    """create_refresh_token with token_type='super_admin' must raise ValueError."""
+    with pytest.raises(ValueError, match="only supports token_type='agency'"):
+        create_refresh_token(subject=str(uuid.uuid4()), token_type="super_admin")
+
+
+def test_create_refresh_token_rejects_missing_agency_id():
+    """create_refresh_token with agency token_type but no agency_id must raise ValueError."""
+    with pytest.raises(ValueError, match="agency_id is required"):
+        create_refresh_token(subject=str(uuid.uuid4()), token_type="agency", agency_id=None)

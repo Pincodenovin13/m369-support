@@ -126,11 +126,20 @@ def create_refresh_token(
 ) -> str:
     """Long-lived refresh token. Shares the signing key with its access sibling.
 
+    Only ``token_type="agency"`` is supported in Phase 1.
+    Super Admin refresh tokens are not implemented — calling with
+    ``token_type="super_admin"`` raises ``ValueError``.
+
     For ``token_type="agency"``, ``agency_id`` is **required** — the refresh
     token is bound to the agency selected at login and cannot be used to
     switch agencies.
     """
-    if token_type == "agency" and not agency_id:
+    if token_type != "agency":
+        raise ValueError(
+            f"create_refresh_token only supports token_type='agency' in Phase 1; "
+            f"got '{token_type}'"
+        )
+    if not agency_id:
         raise ValueError("agency_id is required for agency refresh tokens")
 
     s = get_settings()
@@ -145,11 +154,10 @@ def create_refresh_token(
         "iss": s.jwt_issuer,
         "aud": s.jwt_audience,
         "jti": uuid.uuid4().hex,
-        "scope": token_type,
+        "scope": "agency",
+        "agency_id": agency_id,
     }
-    if token_type == "agency":
-        payload["agency_id"] = agency_id
-    return jwt.encode(payload, _signing_key(token_type), algorithm=s.jwt_algorithm)
+    return jwt.encode(payload, _signing_key("agency"), algorithm=s.jwt_algorithm)
 
 
 def _decode(token: str, expected_type: TokenType) -> dict[str, Any] | None:
