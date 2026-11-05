@@ -2,16 +2,11 @@
 
 Architecture:
     - ``setup_engine`` connects as ``postgres`` (superuser) — used for
-      schema setup (alembic upgrade) and test data insertion. PostgreSQL
-      superusers bypass RLS, so setup can insert any data.
+      schema setup (alembic upgrade) and test data insertion.
     - ``test_engine`` connects as ``m369_app`` (ordinary role, NO BYPASSRLS,
       NO SUPERUSER) — used for actual test assertions. RLS is enforced.
-
-    Tests insert data via ``setup_session`` (postgres) and verify
-    behavior via ``db_session`` (m369_app with RLS enforced).
-
-    The schema is created via the real Alembic migration
-    (``alembic upgrade head``), NOT via ``Base.metadata.create_all()``.
+    - Schema is created via the real Alembic migration (``alembic upgrade head``).
+    - No ``except: pass`` — all errors are surfaced.
 """
 from __future__ import annotations
 
@@ -23,7 +18,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 
@@ -31,17 +26,15 @@ from sqlalchemy.orm import Session
 # Environment — must be set before importing app
 # ---------------------------------------------------------------------------
 
-os.environ.setdefault(
-    "DATABASE_URL",
-    "postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support_test",
-)
-os.environ.setdefault(
-    "TEST_DATABASE_URL",
-    "postgresql+psycopg://postgres@localhost:5432/m369_support_test",
-)
+# Runtime: m369_app (least-privilege)
+# Setup/migration: postgres (superuser)
+M369_APP_DB_URL = "postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support_test"
+SETUP_DB_URL = "postgresql+psycopg://postgres@localhost:5432/m369_support_test"
+
+os.environ["DATABASE_URL"] = M369_APP_DB_URL
+os.environ["TEST_DATABASE_URL"] = SETUP_DB_URL
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("ENVIRONMENT", "test")
-os.environ["DATABASE_URL"] = "postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support_test"
 
 # App imports must come AFTER env setup
 from app.db.database import Base, get_db  # noqa: E402
@@ -54,13 +47,8 @@ from app.models import Agency, AgencyMembership, User  # noqa: E402
 # Engines
 # ---------------------------------------------------------------------------
 
-# Setup engine: connects as postgres (superuser) — bypasses RLS for setup
-SETUP_DB_URL = os.environ.get("TEST_DATABASE_URL", "postgresql+psycopg://postgres@localhost:5432/m369_support_test")
 setup_engine = create_engine(SETUP_DB_URL, pool_pre_ping=True)
-
-# Test engine: connects as m369_app (ordinary role) — RLS enforced
-TEST_DB_URL = "postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support_test"
-test_engine = create_engine(TEST_DB_URL, pool_pre_ping=True)
+test_engine = create_engine(M369_APP_DB_URL, pool_pre_ping=True)
 
 
 def _test_db_available() -> bool:
@@ -68,7 +56,8 @@ def _test_db_available() -> bool:
         with setup_engine.connect() as conn:
             conn.exec_driver_sql("SELECT 1")
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[conftest] PostgreSQL unavailable: {e}")
         return False
 
 
@@ -84,21 +73,24 @@ HAVE_PG = _test_db_available()
 def db_engine():
     """Run the real Alembic migration against the test database.
 
-    This creates all tables, roles, RLS policies, and grants — exactly
-    as they would be in production. No manual schema creation.
+    Creates all tables, roles, RLS policies, and grants — exactly as
+    they would be in production. No manual schema creation.
     """
     if not HAVE_PG:
-        pytest.skip("PostgreSQL test database unavailable", allow_module_level=False)
+        pytest.fail("PostgreSQL test database unavailable — cannot run security tests")
 
-    # Drop all existing tables and roles (clean slate)
+    # Clean slate: drop schema, recreate, ensure m369_app role exists
     with setup_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE")
         conn.exec_driver_sql("CREATE SCHEMA public")
         conn.exec_driver_sql("GRANT ALL ON SCHEMA public TO postgres")
-        conn.exec_driver_sql("GRANT ALL ON SCHEMA public TO m369")
-        # Ensure m369_app exists (needed for test_engine to connect)
-        conn.exec_driver_sql("DO $$ BEGIN CREATE ROLE m369_app LOGIN PASSWORD 'm369_app_dev_password'; EXCEPTION WHEN duplicate_object THEN NULL; END $$")
-        conn.exec_driver_sql("ALTER ROLE m369_app NOSUPERUSER NOBYPASSRLS NOCREATEROLE")
+
+        # Ensure m369_app role exists (provisioned externally — NOT by migration)
+        conn.exec_driver_sql(
+            "DO $$ BEGIN CREATE ROLE m369_app LOGIN PASSWORD 'm369_app_dev_password' "
+            "NOSUPERUSER NOBYPASSRLS NOCREATEROLE; "
+            "EXCEPTION WHEN duplicate_object THEN ALTER ROLE m369_app NOSUPERUSER NOBYPASSRLS NOCREATEROLE; END $$"
+        )
         conn.exec_driver_sql("GRANT ALL ON SCHEMA public TO m369_app")
 
     # Run Alembic migration as postgres (superuser — owns tables)
@@ -110,7 +102,7 @@ def db_engine():
         text=True,
         env={
             **os.environ,
-            "DATABASE_URL": "postgresql+psycopg://postgres@localhost:5432/m369_support_test",
+            "DATABASE_URL": SETUP_DB_URL,
         },
     )
     if result.returncode != 0:
@@ -122,7 +114,7 @@ def db_engine():
 
     yield test_engine
 
-    # Teardown: drop schema only (roles persist — they're idempotent)
+    # Teardown: drop schema only (roles persist — managed externally)
     with setup_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE")
         conn.exec_driver_sql("CREATE SCHEMA public")
@@ -145,10 +137,15 @@ def setup_session(db_engine) -> Iterator[Session]:
     try:
         yield session
     finally:
-        # Truncate all tables for next test
         session.close()
+        # Truncate ALL tables for next test (use setup connection as superuser)
         with setup_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
-            c.exec_driver_sql("TRUNCATE TABLE audit_logs, conversations, contacts, team_memberships, teams, agency_memberships, users, workspaces, agencies, super_admins, super_admin_audit_logs RESTART IDENTITY CASCADE")
+            c.exec_driver_sql(
+                "TRUNCATE TABLE audit_logs, conversations, contacts, "
+                "team_memberships, teams, agency_memberships, users, "
+                "workspaces, agencies, super_admins, super_admin_audit_logs "
+                "RESTART IDENTITY CASCADE"
+            )
         conn.close()
 
 

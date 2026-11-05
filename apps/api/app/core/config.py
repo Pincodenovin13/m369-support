@@ -25,11 +25,13 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False)
 
     # --- Database ---
+    # Runtime: m369_app (least-privilege, NO BYPASSRLS, NO SUPERUSER)
+    # Migration/bootstrap: separate privileged connection (e.g., postgres)
     database_url: str = Field(
-        default="postgresql+psycopg://m369:m369_dev_password@localhost:5432/m369_support"
+        default="postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support"
     )
     test_database_url: str = Field(
-        default="postgresql+psycopg://m369:m369_dev_password@localhost:5432/m369_support_test"
+        default="postgresql+psycopg://postgres@localhost:5432/m369_support_test"
     )
 
     # --- JWT ---

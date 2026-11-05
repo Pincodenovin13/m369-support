@@ -40,23 +40,23 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # --- Roles ---
+    # SECURITY: No passwords are hardcoded in migrations.
+    # The m369_app role MUST be provisioned externally (bootstrap script,
+    # Docker entrypoint, or DBA) before running the migration.
+    # The migration only creates the NOLOGIN m369_super_admin role and grants.
+    #
     # m369_app: runtime application role (LOGIN, least privilege)
-    #   - NOT SUPERUSER
-    #   - NOT BYPASSRLS (cannot bypass RLS even with SET LOCAL)
-    #   - NOT CREATEROLE (cannot create or assume other roles)
-    op.execute("DO $$ BEGIN CREATE ROLE m369_app LOGIN PASSWORD 'm369_app_dev_password'; EXCEPTION WHEN duplicate_object THEN NULL; END $$")
-    op.execute("ALTER ROLE m369_app NOSUPERUSER NOBYPASSRLS NOCREATEROLE")
-
-    # m369_super_admin: privileged role for Super Admin operations (NOLOGIN)
-    #   - Has BYPASSRLS attribute
-    #   - Used only via a separate connection pool with m369_admin_login
+    #   - NOT SUPERUSER, NOT BYPASSRLS, NOT CREATEROLE
+    #   - Provisioned externally with a secure password
+    #   - Migration verifies it exists and grants DML; does NOT create it.
+    #
+    # m369_super_admin: NOLOGIN role with BYPASSRLS
+    #   - No LOGIN path exists — no credential can exploit it yet.
+    #   - A separate, audited Super Admin data-access service will be
+    #     built in a future phase with its own credential provisioning.
+    #   - For now, the role exists but has no login member, so BYPASSRLS
+    #     cannot be exercised by any connection.
     op.execute("DO $$ BEGIN CREATE ROLE m369_super_admin NOLOGIN BYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END $$")
-
-    # m369_admin_login: LOGIN role for Super Admin connections
-    #   - Member of m369_super_admin (inherits BYPASSRLS)
-    #   - Used ONLY by the Super Admin code path
-    op.execute("DO $$ BEGIN CREATE ROLE m369_admin_login LOGIN PASSWORD 'm369_admin_dev_password'; EXCEPTION WHEN duplicate_object THEN NULL; END $$")
-    op.execute("GRANT m369_super_admin TO m369_admin_login")
 
     # --- super_admins ---
     op.create_table(
@@ -245,10 +245,14 @@ def upgrade() -> None:
     # The migration runner (e.g., postgres) owns the tables. m369_app gets
     # SELECT/INSERT/UPDATE/DELETE but NOT ownership — it cannot bypass RLS.
     # m369_admin_login gets the same DML + inherits BYPASSRLS from m369_super_admin.
+    # Grant DML to m369_app (the runtime role).
+    # m369_super_admin gets DML too (for future Super Admin service).
+    # NO login role is granted membership in m369_super_admin —
+    # BYPASSRLS is dormant until a reviewed service is built.
     op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO m369_app")
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO m369_admin_login")
     op.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO m369_app")
-    op.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO m369_admin_login")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO m369_super_admin")
+    op.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO m369_super_admin")
 
     # --- RLS: enable + FORCE on all tenant-owned tables ---
     tenant_tables = [
@@ -312,6 +316,6 @@ def downgrade() -> None:
     ]:
         op.drop_table(table)
 
-    op.execute("DROP ROLE IF EXISTS m369_admin_login")
+    # NOTE: m369_app is NOT dropped — it is provisioned externally.
+    # Only the m369_super_admin role (created by this migration) is dropped.
     op.execute("DROP ROLE IF EXISTS m369_super_admin")
-    op.execute("DROP ROLE IF EXISTS m369_app")
