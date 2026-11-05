@@ -39,10 +39,6 @@ class TokenResponse(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
-    agency_id: uuid.UUID | None = Field(
-        default=None,
-        description="Required if user belongs to multiple agencies.",
-    )
 
 
 # ---------------------------------------------------------------------------

@@ -70,16 +70,20 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
 
 
 def _issue_tokens_for(user: User, agency_id: uuid.UUID) -> tuple[str, str]:
-    """Issue access + refresh tokens scoped to ``agency_id``."""
+    """Issue access + refresh tokens scoped to ``agency_id``.
+
+    Both tokens carry ``agency_id`` — the refresh token is bound to the
+    agency selected at login and cannot be used to switch agencies.
+    """
     access = create_access_token(
         subject=str(user.id),
         token_type="agency",
         agency_id=str(agency_id),
     )
-    # Refresh token carries the agency_id so refresh can revalidate it.
     refresh = create_refresh_token(
         subject=str(user.id),
         token_type="agency",
+        agency_id=str(agency_id),
     )
     return access, refresh
 
@@ -203,14 +207,14 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
 def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
     """Exchange a refresh token for a new access token.
 
-    The refresh token's ``sub`` (user_id) is used to look up the user.
-    The ``agency_id`` from the original access token is NOT stored in the
-    refresh token — instead, the refresh endpoint looks up the user's
-    memberships and requires explicit ``agency_id`` in the request body
-    if the user has multiple.
+    The ``agency_id`` is read **only** from the signed refresh token —
+    never from the request body. This prevents switching agencies via
+    refresh.
 
-    However, the refresh token's ``scope`` claim must be ``agency`` —
-    a Super Admin refresh token cannot be used here.
+    The token's agency_id is validated against:
+    - User is active
+    - User still has an active membership in that agency
+    - The agency is still active
     """
     decoded = decode_refresh_token(payload.refresh_token, expected_scope="agency")
     if decoded is None:
@@ -218,6 +222,7 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
 
     try:
         user_id = uuid.UUID(decoded["sub"])
+        token_agency_id = uuid.UUID(decoded["agency_id"])
     except (KeyError, ValueError):
         raise HTTPException(status_code=401, detail="Malformed refresh token") from None
 
@@ -225,16 +230,30 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
 
-    # Use _resolve_membership to handle single vs multi-agency
-    requested_agency_id = payload.agency_id
-    agency_id, _ = _resolve_membership(db, user, requested_agency_id)
+    # Revalidate membership using the SECURITY DEFINER function
+    rows = db.execute(
+        text("SELECT agency_id, is_active, role FROM get_user_memberships_for_login(:uid)"),
+        {"uid": str(user.id)},
+    ).all()
+
+    # Find the membership matching the token's agency_id
+    matching = [r for r in rows if r.agency_id == token_agency_id and r.is_active]
+    if not matching:
+        raise HTTPException(
+            status_code=403,
+            detail="Membership for this agency is no longer active or has been removed",
+        )
 
     access = create_access_token(
         subject=str(user.id),
         token_type="agency",
-        agency_id=str(agency_id),
+        agency_id=str(token_agency_id),
     )
-    new_refresh = create_refresh_token(subject=str(user.id), token_type="agency")
+    new_refresh = create_refresh_token(
+        subject=str(user.id),
+        token_type="agency",
+        agency_id=str(token_agency_id),
+    )
     return TokenResponse(
         access_token=access,
         refresh_token=new_refresh,

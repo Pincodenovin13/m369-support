@@ -8,9 +8,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.models import Agency, AgencyMembership, User
@@ -65,13 +66,11 @@ def test_login_multi_membership_requires_agency_id(client: TestClient, setup_ses
     agency_a_obj, _, _ = agency_a
     agency_b_obj, _, _ = agency_b
 
-    # Create a user with memberships in both agencies
     user = _create_user_with_memberships(
         setup_session,
         "multi@example.com",
         [(agency_a_obj, "agent"), (agency_b_obj, "agent")],
     )
-    # Set a real password
     from app.security import hash_password
     user.password_hash = hash_password("test-password-123")
     setup_session.commit()
@@ -112,7 +111,6 @@ def test_login_wrong_agency_id_rejected(client: TestClient, setup_session: Sessi
     agency_a_obj, _, _ = agency_a
     agency_b_obj, _, _ = agency_b
 
-    # User is only in agency A
     user = _create_user_with_memberships(
         setup_session,
         "single@example.com",
@@ -122,7 +120,6 @@ def test_login_wrong_agency_id_rejected(client: TestClient, setup_session: Sessi
     user.password_hash = hash_password("test-password-123")
     setup_session.commit()
 
-    # Try to login specifying agency B
     r = client.post("/api/v1/auth/login", json={
         "email": "single@example.com",
         "password": "test-password-123",
@@ -132,7 +129,7 @@ def test_login_wrong_agency_id_rejected(client: TestClient, setup_session: Sessi
 
 
 # ---------------------------------------------------------------------------
-# B. Agency Selection — Refresh
+# B. Refresh Token — Bound to Agency
 # ---------------------------------------------------------------------------
 
 
@@ -140,35 +137,165 @@ def test_refresh_preserves_agency_context(client: TestClient, setup_session: Ses
     """Refresh token for agency A must produce an access token for agency A."""
     agency, owner, _ = agency_a
 
-    # Login to get tokens
     r = client.post("/api/v1/auth/login", json={
         "email": "owner@agency-a.com",
         "password": "test-password-123",
     })
     assert r.status_code == 200
 
-    # Extract refresh token from cookies
     refresh_token = r.cookies.get("refresh_token")
     assert refresh_token is not None
 
-    # Refresh
     r2 = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
     assert r2.status_code == 200, f"Expected 200, got {r2.status_code}: {r2.text}"
 
-    # The new access token should work for agency A
     new_access = r2.json()["access_token"]
     r3 = client.get("/api/v1/agencies/current", headers={"Authorization": f"Bearer {new_access}"})
     assert r3.status_code == 200, f"Expected 200, got {r3.status_code}: {r3.text}"
     assert r3.json()["id"] == str(agency.id)
 
 
+def test_refresh_cannot_switch_agency(client: TestClient, setup_session: Session, agency_a, agency_b):
+    """Refresh token for agency A must NOT produce access token for agency B.
+
+    The RefreshRequest schema no longer has an agency_id field.
+    Sending agency_id in the body should be ignored (extra fields are
+    rejected by Pydantic with extra='forbid' or simply ignored).
+    The agency_id comes ONLY from the signed refresh token.
+    """
+    agency_a_obj, _, _ = agency_a
+    agency_b_obj, _, _ = agency_b
+
+    # Create multi-agency user
+    user = _create_user_with_memberships(
+        setup_session,
+        "refresh-switch@example.com",
+        [(agency_a_obj, "agent"), (agency_b_obj, "agent")],
+    )
+    from app.security import hash_password
+    user.password_hash = hash_password("test-password-123")
+    setup_session.commit()
+
+    # Login as agency A
+    r = client.post("/api/v1/auth/login", json={
+        "email": "refresh-switch@example.com",
+        "password": "test-password-123",
+        "agency_id": str(agency_a_obj.id),
+    })
+    assert r.status_code == 200
+    refresh_token = r.cookies.get("refresh_token")
+    assert refresh_token is not None
+
+    # Try to refresh — the response should be for agency A, NOT B
+    r2 = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+    assert r2.status_code == 200, f"Expected 200, got {r2.status_code}: {r2.text}"
+
+    new_access = r2.json()["access_token"]
+    r3 = client.get("/api/v1/agencies/current", headers={"Authorization": f"Bearer {new_access}"})
+    assert r3.status_code == 200
+    assert r3.json()["id"] == str(agency_a_obj.id), (
+        f"Refresh switched agency! Expected {agency_a_obj.id}, got {r3.json()['id']}"
+    )
+
+
 def test_refresh_rejects_wrong_scope(client: TestClient, setup_session: Session):
     """Super Admin refresh token must not work on /auth/refresh (agency scope)."""
-    from app.security import create_refresh_token
-
     sa_refresh = create_refresh_token(subject=str(uuid.uuid4()), token_type="super_admin")
     r = client.post("/api/v1/auth/refresh", json={"refresh_token": sa_refresh})
     assert r.status_code == 401, f"Expected 401, got {r.status_code}: {r.text}"
+
+
+def test_refresh_rejects_token_without_agency_id(client: TestClient, setup_session: Session, agency_a):
+    """A refresh token without agency_id claim must be rejected."""
+    # Manually craft a refresh token without agency_id using the internal API
+    import jwt as pyjwt
+    from app.core.config import get_settings
+    s = get_settings()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(uuid.uuid4()),
+        "type": "refresh",
+        "exp": int((now + __import__("datetime").timedelta(days=30)).timestamp()),
+        "iat": int(now.timestamp()),
+        "iss": s.jwt_issuer,
+        "aud": s.jwt_audience,
+        "jti": uuid.uuid4().hex,
+        "scope": "agency",
+        # NOTE: no agency_id
+    }
+    bad_token = pyjwt.encode(payload, s.jwt_secret_key, algorithm=s.jwt_algorithm)
+
+    r = client.post("/api/v1/auth/refresh", json={"refresh_token": bad_token})
+    assert r.status_code == 401, f"Expected 401, got {r.status_code}: {r.text}"
+
+
+def test_refresh_rejects_invalid_agency_id(client: TestClient, setup_session: Session):
+    """A refresh token with an invalid (non-UUID) agency_id must be rejected."""
+    import jwt as pyjwt
+    from app.core.config import get_settings
+    s = get_settings()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(uuid.uuid4()),
+        "type": "refresh",
+        "exp": int((now + __import__("datetime").timedelta(days=30)).timestamp()),
+        "iat": int(now.timestamp()),
+        "iss": s.jwt_issuer,
+        "aud": s.jwt_audience,
+        "jti": uuid.uuid4().hex,
+        "scope": "agency",
+        "agency_id": "not-a-uuid",
+    }
+    bad_token = pyjwt.encode(payload, s.jwt_secret_key, algorithm=s.jwt_algorithm)
+
+    r = client.post("/api/v1/auth/refresh", json={"refresh_token": bad_token})
+    assert r.status_code == 401, f"Expected 401, got {r.status_code}: {r.text}"
+
+
+def test_refresh_rejected_after_membership_removed(client: TestClient, setup_session: Session, agency_a):
+    """If membership is removed after login, refresh must be rejected."""
+    agency, owner, _ = agency_a
+
+    r = client.post("/api/v1/auth/login", json={
+        "email": "owner@agency-a.com",
+        "password": "test-password-123",
+    })
+    assert r.status_code == 200
+    refresh_token = r.cookies.get("refresh_token")
+
+    # Remove the membership
+    membership = setup_session.scalar(
+        select(AgencyMembership).where(
+            AgencyMembership.user_id == owner.id,
+            AgencyMembership.agency_id == agency.id,
+        )
+    )
+    setup_session.delete(membership)
+    setup_session.commit()
+
+    # Refresh should fail
+    r2 = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+    assert r2.status_code == 403, f"Expected 403, got {r2.status_code}: {r2.text}"
+
+
+def test_refresh_rejected_after_agency_deactivated(client: TestClient, setup_session: Session, agency_a):
+    """If agency is deactivated after login, refresh must be rejected."""
+    agency, owner, _ = agency_a
+
+    r = client.post("/api/v1/auth/login", json={
+        "email": "owner@agency-a.com",
+        "password": "test-password-123",
+    })
+    assert r.status_code == 200
+    refresh_token = r.cookies.get("refresh_token")
+
+    # Deactivate the agency
+    agency.is_active = False
+    setup_session.commit()
+
+    # Refresh should fail
+    r2 = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+    assert r2.status_code == 403, f"Expected 403, got {r2.status_code}: {r2.text}"
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +351,6 @@ def test_inactive_agency_rejected_on_api_access(client: TestClient, setup_sessio
     """Even with a valid token, an inactive agency should return 403."""
     agency, owner, owner_token = agency_a
 
-    # Deactivate the agency
     agency.is_active = False
     setup_session.commit()
 
@@ -237,7 +363,7 @@ def test_inactive_agency_rejected_on_api_access(client: TestClient, setup_sessio
 
 
 # ---------------------------------------------------------------------------
-# C. Super Admin token on agency endpoints
+# C. Super Admin token isolation
 # ---------------------------------------------------------------------------
 
 
@@ -262,26 +388,20 @@ def test_agency_token_rejected_on_super_admin_endpoint(client: TestClient, agenc
 
 
 # ---------------------------------------------------------------------------
-# B. Membership verification — cross-agency token
+# B. Cross-agency token rejection
 # ---------------------------------------------------------------------------
 
 
 def test_token_with_wrong_agency_id_rejected(client: TestClient, setup_session: Session, agency_a, agency_b):
-    """Token scoped to agency A cannot access agency B's resources.
-
-    This is enforced by RLS (the DB session SET LOCAL app.tenant_id = A)
-    and by get_current_agency_id (membership check).
-    """
+    """Token scoped to agency A cannot access agency B's resources."""
     agency_a_obj, owner_a, token_a = agency_a
     agency_b_obj, _, _ = agency_b
 
-    # Create a resource in agency B
     from app.models import Workspace
     ws_b = Workspace(agency_id=agency_b_obj.id, name="WS B", slug=f"ws-b-{uuid.uuid4().hex[:6]}")
     setup_session.add(ws_b)
     setup_session.commit()
 
-    # User A tries to list workspaces — should only see agency A's workspaces
     r = client.get(
         "/api/v1/workspaces",
         headers={"Authorization": f"Bearer {token_a}"},
@@ -292,3 +412,77 @@ def test_token_with_wrong_agency_id_rejected(client: TestClient, setup_session: 
         assert ws["agency_id"] == str(agency_a_obj.id), (
             f"Agency A saw workspace belonging to agency B: {ws}"
         )
+
+
+# ---------------------------------------------------------------------------
+# FIX 2 — SECURITY DEFINER function ACL tests
+# ---------------------------------------------------------------------------
+
+APP_DB_URL = "postgresql://m369_app:m369_app_dev_password@localhost:5432/m369_support_test"
+
+
+def test_public_cannot_execute_login_helper_function(db_engine):
+    """PUBLIC role must NOT have EXECUTE on get_user_memberships_for_login."""
+    conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT proacl
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE n.nspname = 'public'
+                  AND p.proname = 'get_user_memberships_for_login'
+            """)
+            row = cur.fetchone()
+            assert row is not None, "Function get_user_memberships_for_login not found"
+            acl = row[0]
+            if acl is not None:
+                # Check that PUBLIC does not have EXECUTE
+                # ACL format: {owner=X/owner,m369_app=X/m369_app}
+                # We check for "=X/" entries that belong to PUBLIC (no role name before =)
+                for acl_entry in acl:
+                    # PUBLIC entries look like "=X/" (no grantee before =)
+                    # Skip entries that have a grantee (like "m369_app=X/m369_app")
+                    if acl_entry.startswith("=X"):
+                        pytest.fail(f"PUBLIC has EXECUTE on function — ACL: {acl_entry}")
+    finally:
+        conn.close()
+
+
+def test_m369_app_can_execute_login_helper_function(db_engine):
+    """m369_app must have EXECUTE on get_user_memberships_for_login."""
+    conn = psycopg.connect(APP_DB_URL)
+    try:
+        with conn.cursor() as cur:
+            # Try calling the function — should succeed
+            cur.execute("SELECT count(*) FROM get_user_memberships_for_login('00000000-0000-0000-0000-000000000000')")
+            count = cur.fetchone()[0]
+            assert count == 0, f"Expected 0 memberships for non-existent user, got {count}"
+    except psycopg.errors.InsufficientPrivilege:
+        pytest.fail("m369_app cannot execute get_user_memberships_for_login — missing EXECUTE privilege")
+    finally:
+        conn.close()
+
+
+def test_login_helper_function_is_security_definer(db_engine):
+    """Function must have prosecdef=true (SECURITY DEFINER)."""
+    conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT p.prosecdef, p.proconfig, pg_get_userbyid(p.proowner)
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE n.nspname = 'public'
+                  AND p.proname = 'get_user_memberships_for_login'
+            """)
+            row = cur.fetchone()
+            assert row is not None, "Function not found"
+            prosecdef, proconfig, owner = row
+            assert prosecdef is True, f"prosecdef={prosecdef}, expected True"
+            assert owner == "postgres", f"Function owner is {owner}, expected postgres"
+            # Verify search_path is restricted
+            assert proconfig is not None, "proconfig is NULL — search_path not set"
+            assert "pg_catalog" in str(proconfig), f"search_path does not include pg_catalog: {proconfig}"
+    finally:
+        conn.close()

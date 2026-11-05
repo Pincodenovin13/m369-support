@@ -118,13 +118,26 @@ def create_access_token(
     return jwt.encode(payload, _signing_key(token_type), algorithm=s.jwt_algorithm)
 
 
-def create_refresh_token(*, subject: str, token_type: TokenType = "agency") -> str:
-    """Long-lived refresh token. Shares the signing key with its access sibling."""
+def create_refresh_token(
+    *,
+    subject: str,
+    token_type: TokenType = "agency",
+    agency_id: str | None = None,
+) -> str:
+    """Long-lived refresh token. Shares the signing key with its access sibling.
+
+    For ``token_type="agency"``, ``agency_id`` is **required** — the refresh
+    token is bound to the agency selected at login and cannot be used to
+    switch agencies.
+    """
+    if token_type == "agency" and not agency_id:
+        raise ValueError("agency_id is required for agency refresh tokens")
+
     s = get_settings()
     now = datetime.now(timezone.utc)
     now_ts = int(now.timestamp())
     exp_ts = int((now + timedelta(days=s.jwt_refresh_token_days)).timestamp())
-    payload = {
+    payload: dict[str, Any] = {
         "sub": subject,
         "type": "refresh",
         "exp": exp_ts,
@@ -134,6 +147,8 @@ def create_refresh_token(*, subject: str, token_type: TokenType = "agency") -> s
         "jti": uuid.uuid4().hex,
         "scope": token_type,
     }
+    if token_type == "agency":
+        payload["agency_id"] = agency_id
     return jwt.encode(payload, _signing_key(token_type), algorithm=s.jwt_algorithm)
 
 
@@ -167,10 +182,23 @@ def decode_super_admin_token(token: str) -> dict[str, Any] | None:
 
 
 def decode_refresh_token(token: str, expected_scope: TokenType = "agency") -> dict[str, Any] | None:
-    """Decode a refresh token. ``expected_scope`` must match the access class it refreshes."""
+    """Decode a refresh token. ``expected_scope`` must match the access class it refreshes.
+
+    For ``expected_scope="agency"``, the token must also contain a valid
+    ``agency_id`` claim (UUID string). Tokens without it are rejected.
+    """
     payload = _decode(token, "refresh")
     if payload is None or payload.get("scope") != expected_scope:
         return None
+    # For agency scope, agency_id must be present and a valid UUID
+    if expected_scope == "agency":
+        agency_id_str = payload.get("agency_id")
+        if not agency_id_str:
+            return None
+        try:
+            uuid.UUID(agency_id_str)
+        except (ValueError, TypeError):
+            return None
     return payload
 
 
