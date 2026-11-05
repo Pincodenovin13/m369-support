@@ -18,7 +18,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_DIR = Path(__file__).resolve().parents[2]
-REPO_ROOT = APP_DIR.parents[1]
+
+# In the local repository APP_DIR is usually <repo>/apps/api.
+# In the Docker image APP_DIR is /app and has only one parent.
+# Avoid indexing a parent that does not exist.
+REPO_ROOT = (
+    APP_DIR.parents[1]
+    if len(APP_DIR.parents) > 1
+    else APP_DIR
+)
 
 
 # Sentinel values that must NEVER appear in production
@@ -26,6 +34,7 @@ _DEV_DEFAULTS = {
     "dev-only-change-this-to-64-char-random-string-in-production-please",
     "dev-only-super-admin-secret-change-this-too-in-production-please",
     "dev-only-change-this-key-please-32-bytes-base64",
+    "dev-only-change-this-key-please-32-bytes-base64-url-safe",
 }
 
 # Known dev-only database password fragments
