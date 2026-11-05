@@ -55,11 +55,11 @@ def _seed_two_agencies(setup_session: Session):
     ))
     setup_session.execute(text(
         f"INSERT INTO contacts (id, workspace_id, agency_id, email, name) "
-        f"VALUES ('{contact_a_id}', '{ws_a_id}', '{agency_a_id}', 'a@agency-a.test', 'A')"
+        f"VALUES ('{contact_a_id}', '{ws_a_id}', '{agency_a_id}', 'a@agency-a.com', 'A')"
     ))
     setup_session.execute(text(
         f"INSERT INTO contacts (id, workspace_id, agency_id, email, name) "
-        f"VALUES ('{contact_b_id}', '{ws_b_id}', '{agency_b_id}', 'b@agency-b.test', 'B')"
+        f"VALUES ('{contact_b_id}', '{ws_b_id}', '{agency_b_id}', 'b@agency-b.com', 'B')"
     ))
     setup_session.commit()
 
@@ -95,10 +95,10 @@ def test_set_local_bypass_rls_does_not_leak_cross_tenant(db_engine, setup_sessio
             cur.execute("SELECT email FROM contacts ORDER BY email")
             visible = {row[0] for row in cur.fetchall()}
 
-            assert "a@agency-a.test" in visible, (
+            assert "a@agency-a.com" in visible, (
                 f"Agency A should see its own contact, got: {visible}"
             )
-            assert "b@agency-b.test" not in visible, (
+            assert "b@agency-b.com" not in visible, (
                 f"RLS BYPASS: app.bypass_rls='on' exposed Agency B's contact. "
                 f"Visible: {visible}"
             )
@@ -125,10 +125,10 @@ def test_set_session_bypass_rls_does_not_leak_cross_tenant(db_engine, setup_sess
             cur.execute("SELECT email FROM contacts ORDER BY email")
             visible = {row[0] for row in cur.fetchall()}
 
-            assert "a@agency-a.test" in visible, (
+            assert "a@agency-a.com" in visible, (
                 f"Agency A should see its own contact, got: {visible}"
             )
-            assert "b@agency-b.test" not in visible, (
+            assert "b@agency-b.com" not in visible, (
                 f"RLS BYPASS: session SET exposed Agency B's contact. "
                 f"Visible: {visible}"
             )
@@ -218,7 +218,7 @@ def test_cross_tenant_insert_blocked_by_rls(db_engine, setup_session):
             with pytest.raises(psycopg.errors.Error) as exc_info:
                 cur.execute(
                     "INSERT INTO contacts (id, workspace_id, agency_id, email, name) "
-                    "VALUES (%s, %s, %s, 'attack@agency-b.test', 'Attack')",
+                    "VALUES (%s, %s, %s, 'attack@agency-b.com', 'Attack')",
                     (new_contact_id, ids["ws_b_id"], ids["agency_b_id"]),
                 )
 
@@ -248,7 +248,7 @@ def test_cross_tenant_update_blocked_by_rls(db_engine, setup_session):
             cur.execute("SELECT set_config('app.tenant_id', %s, true)", (ids["agency_a_id"],))
 
             cur.execute(
-                "UPDATE contacts SET name = 'Hacked' WHERE email = 'b@agency-b.test'"
+                "UPDATE contacts SET name = 'Hacked' WHERE email = 'b@agency-b.com'"
             )
             assert cur.rowcount == 0, (
                 f"RLS BYPASS: UPDATE affected {cur.rowcount} rows belonging to Agency B"
@@ -272,7 +272,7 @@ def test_cross_tenant_delete_blocked_by_rls(db_engine, setup_session):
         with conn.cursor() as cur:
             cur.execute("SELECT set_config('app.tenant_id', %s, true)", (ids["agency_a_id"],))
 
-            cur.execute("DELETE FROM contacts WHERE email = 'b@agency-b.test'")
+            cur.execute("DELETE FROM contacts WHERE email = 'b@agency-b.com'")
             assert cur.rowcount == 0, (
                 f"RLS BYPASS: DELETE affected {cur.rowcount} rows belonging to Agency B"
             )

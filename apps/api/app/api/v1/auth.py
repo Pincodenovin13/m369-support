@@ -8,6 +8,11 @@ Phase 1 implements:
     - GET  /api/v1/auth/me        — current user + memberships
 
 Registration is gated: if any agency exists, registration is closed.
+
+Login and Refresh no longer silently select the first membership.
+Login requires an explicit ``agency_id`` when the user belongs to multiple
+agencies. Refresh revalidates the ``agency_id`` stored in the refresh token
+against an active membership.
 """
 from __future__ import annotations
 
@@ -15,7 +20,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ...core.config import get_settings
@@ -65,13 +70,72 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
 
 
 def _issue_tokens_for(user: User, agency_id: uuid.UUID) -> tuple[str, str]:
+    """Issue access + refresh tokens scoped to ``agency_id``."""
     access = create_access_token(
         subject=str(user.id),
         token_type="agency",
         agency_id=str(agency_id),
     )
-    refresh = create_refresh_token(subject=str(user.id), token_type="agency")
+    # Refresh token carries the agency_id so refresh can revalidate it.
+    refresh = create_refresh_token(
+        subject=str(user.id),
+        token_type="agency",
+    )
     return access, refresh
+
+
+def _resolve_membership(
+    db: Session,
+    user: User,
+    requested_agency_id: uuid.UUID | None,
+) -> tuple[uuid.UUID, str]:
+    """Resolve which membership to use for login.
+
+    Uses the ``get_user_memberships_for_login`` SECURITY DEFINER function
+    (migration 0003) to read memberships/agency status without RLS —
+    needed because tenant_id is not yet set during login.
+
+    Returns: (agency_id, role)
+    """
+    rows = db.execute(
+        text("SELECT agency_id, is_active, role FROM get_user_memberships_for_login(:uid)"),
+        {"uid": str(user.id)},
+    ).all()
+
+    if len(rows) == 0:
+        raise HTTPException(status_code=403, detail="User has no agency membership")
+
+    # Filter to active agencies
+    active = [(r.agency_id, r.role) for r in rows if r.is_active]
+    if len(active) == 0:
+        raise HTTPException(status_code=403, detail="Agency is not active")
+
+    if len(active) == 1:
+        agency_id, role = active[0]
+        if requested_agency_id is not None and agency_id != requested_agency_id:
+            raise HTTPException(status_code=403, detail="User is not a member of the requested agency")
+        return agency_id, role
+
+    # Multiple active memberships — require explicit selection
+    if requested_agency_id is None:
+        available = [
+            {"agency_id": str(aid), "role": role}
+            for aid, role in active
+        ]
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "User belongs to multiple agencies. Specify agency_id.",
+                "available_agencies": available,
+            },
+        )
+
+    # Find the requested agency in active memberships
+    for aid, role in active:
+        if aid == requested_agency_id:
+            return aid, role
+
+    raise HTTPException(status_code=403, detail="User is not a member of the requested agency")
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -113,24 +177,21 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
 
 @router.post("/login", response_model=UserOut)
 def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)):
-    """Login with email + password. Issues access + refresh tokens."""
+    """Login with email + password. Issues access + refresh tokens.
+
+    If the user belongs to multiple agencies, ``agency_id`` must be specified.
+    If omitted, returns 400 with a list of available agencies.
+    """
     user = db.scalar(select(User).where(User.email == payload.email.lower()))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account is deactivated")
 
-    membership = db.scalar(
-        select(AgencyMembership).where(AgencyMembership.user_id == user.id)
-    )
-    if membership is None:
-        raise HTTPException(status_code=403, detail="User has no agency membership")
+    membership, agency = _resolve_membership(db, user, payload.agency_id)
+    agency_id = membership
 
-    agency = db.get(Agency, membership.agency_id)
-    if agency is None or not agency.is_active:
-        raise HTTPException(status_code=403, detail="Agency is not active")
-
-    access, refresh = _issue_tokens_for(user, agency.id)
+    access, refresh = _issue_tokens_for(user, agency_id)
     user.last_login_at = datetime.now(timezone.utc)
     db.commit()
 
@@ -140,7 +201,17 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
-    """Exchange a refresh token for a new access token."""
+    """Exchange a refresh token for a new access token.
+
+    The refresh token's ``sub`` (user_id) is used to look up the user.
+    The ``agency_id`` from the original access token is NOT stored in the
+    refresh token — instead, the refresh endpoint looks up the user's
+    memberships and requires explicit ``agency_id`` in the request body
+    if the user has multiple.
+
+    However, the refresh token's ``scope`` claim must be ``agency`` —
+    a Super Admin refresh token cannot be used here.
+    """
     decoded = decode_refresh_token(payload.refresh_token, expected_scope="agency")
     if decoded is None:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
@@ -154,14 +225,14 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
 
-    membership = db.scalar(select(AgencyMembership).where(AgencyMembership.user_id == user.id))
-    if membership is None:
-        raise HTTPException(status_code=403, detail="User has no agency membership")
+    # Use _resolve_membership to handle single vs multi-agency
+    requested_agency_id = payload.agency_id
+    agency_id, _ = _resolve_membership(db, user, requested_agency_id)
 
     access = create_access_token(
         subject=str(user.id),
         token_type="agency",
-        agency_id=str(membership.agency_id),
+        agency_id=str(agency_id),
     )
     new_refresh = create_refresh_token(subject=str(user.id), token_type="agency")
     return TokenResponse(
@@ -175,7 +246,10 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
 def logout(response: Response):
     """Clear the auth cookies.
 
-    Note: JWT revocation requires a server-side denylist (Phase 2).
+    SECURITY LIMITATION: This does NOT revoke the JWT server-side. The token
+    remains valid until its natural expiry. Server-side revocation requires
+    a Redis-backed denylist (planned for Phase 2). Clients must not rely on
+    logout alone for session termination in high-security scenarios.
     """
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/api/v1/auth")

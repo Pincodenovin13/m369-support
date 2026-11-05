@@ -270,9 +270,10 @@ def upgrade() -> None:
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
 
     # --- RLS policies ---
-    # SECURITY: Policies ONLY check app.tenant_id. There is NO bypass mechanism.
-    # The previous app.bypass_rls GUC was a vulnerability — any user could
-    # SET LOCAL it. Super Admin uses a separate connection with BYPASSRLS role.
+    # SECURITY: All tenant-owned tables are strictly filtered by app.tenant_id.
+    # There is NO bypass mechanism. The login/refresh flow uses a
+    # SECURITY DEFINER function (migration 0003) to read membership/agency
+    # data before tenant context is established.
     op.execute("""
         CREATE POLICY tenant_isolation_agencies ON agencies
         USING (

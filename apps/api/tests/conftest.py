@@ -206,9 +206,9 @@ def _register_agency(setup_session: Session, name: str, email: str, password: st
 
 @pytest.fixture
 def agency_a(setup_session: Session):
-    return _register_agency(setup_session, "Agency A", "owner@agency-a.test")
+    return _register_agency(setup_session, "Agency A", "owner@agency-a.com")
 
 
 @pytest.fixture
 def agency_b(setup_session: Session):
-    return _register_agency(setup_session, "Agency B", "owner@agency-b.test")
+    return _register_agency(setup_session, "Agency B", "owner@agency-b.com")

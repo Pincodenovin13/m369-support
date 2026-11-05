@@ -8,7 +8,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ..db.database import get_db
-from ..models import AgencyMembership, User
+from ..models import Agency, AgencyMembership, User
 from ..security import decode_access_token, decode_super_admin_token
 from ..tenancy.context import TenantContext
 
@@ -94,7 +94,11 @@ def get_current_agency_id(
 ) -> uuid.UUID:
     """Return the agency id of the current membership.
 
-    For Super Admin, this raises 403 — Super Admin must use dedicated endpoints.
+    Verifies:
+    - User is not a Super Admin (403 if so)
+    - Token has agency_id (403 if not)
+    - User has an active membership in that agency (403 if not)
+    - Agency is active (403 if deactivated)
     """
     if ctx.is_super_admin or ctx.agency_id is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not an agency member")
@@ -106,6 +110,10 @@ def get_current_agency_id(
     )
     if membership is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this agency")
+    # Verify the agency is still active
+    agency = db.get(Agency, ctx.agency_id)
+    if agency is None or not agency.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Agency is not active")
     return ctx.agency_id
 
 
@@ -127,6 +135,10 @@ def require_role(*allowed_roles: str):
         )
         if membership is None or membership.role not in allowed_roles:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role")
+        # Verify the agency is still active
+        agency = db.get(Agency, ctx.agency_id)
+        if agency is None or not agency.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Agency is not active")
         return ctx.agency_id
 
     return checker

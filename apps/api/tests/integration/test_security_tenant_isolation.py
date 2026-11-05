@@ -146,7 +146,7 @@ def test_conversation_cannot_assign_foreign_agency_user(setup_session: Session, 
     ws_a = _make_workspace(setup_session, agency_a[0].id, "WS A")
     contact_a = _make_contact(setup_session, agency_a[0].id, ws_a.id, "a@a.test")
 
-    user_b = User(email=f"b-user-{uuid.uuid4().hex[:6]}@agency-b.test", password_hash="x", name="B User")
+    user_b = User(email=f"b-user-{uuid.uuid4().hex[:6]}@agency-b.com", password_hash="x", name="B User")
     setup_session.add(user_b)
     setup_session.commit()
     setup_session.refresh(user_b)
@@ -309,7 +309,7 @@ def test_authorization_role_check(client: TestClient, setup_session: Session, ag
     """An ``agent`` role cannot create a workspace (only owner/admin can)."""
     agency, owner, owner_token = agency_a
 
-    agent_user = User(email=f"agent-{uuid.uuid4().hex[:6]}@agency-a.test", password_hash="x", name="Agent")
+    agent_user = User(email=f"agent-{uuid.uuid4().hex[:6]}@agency-a.com", password_hash="x", name="Agent")
     setup_session.add(agent_user)
     setup_session.commit()
     setup_session.refresh(agent_user)
@@ -342,7 +342,7 @@ def test_team_membership_cannot_reference_foreign_agency_team(setup_session: Ses
     ws_b = _make_workspace(setup_session, agency_b[0].id, "WS B")
     team_b = _make_team(setup_session, agency_b[0].id, ws_b.id, "Team B")
 
-    user_a = User(email=f"a-user-{uuid.uuid4().hex[:6]}@agency-a.test", password_hash="x", name="A User")
+    user_a = User(email=f"a-user-{uuid.uuid4().hex[:6]}@agency-a.com", password_hash="x", name="A User")
     setup_session.add(user_a)
     setup_session.commit()
     setup_session.refresh(user_a)
