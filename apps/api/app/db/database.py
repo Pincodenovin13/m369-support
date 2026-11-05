@@ -43,6 +43,16 @@ engine: Engine = _build_engine(get_settings().database_url)
 SessionLocal: sessionmaker[Session] = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
+# Super Admin operations need a BYPASSRLS connection to read/write across
+# all tenants. The m369_sa_runner role is provisioned externally with
+# BYPASSRLS but NOSUPERUSER — so it can still only do CRUD on tables,
+# never CREATE/DROP/ROLE/etc.
+super_admin_engine: Engine = _build_engine(get_settings().database_url_super_admin)
+SuperAdminSessionLocal: sessionmaker[Session] = sessionmaker(
+    bind=super_admin_engine, autoflush=False, expire_on_commit=False
+)
+
+
 class Base(DeclarativeBase):
     """Declarative base for all SQLAlchemy models."""
 
@@ -74,6 +84,25 @@ def _reissue_tenant_guc_on_txn_begin(session: Session, transaction: Any, connect
 def get_db() -> Iterator[Session]:
     """FastAPI dependency: yield a session, ensure it is closed."""
     db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def get_super_admin_db() -> Iterator[Session]:
+    """FastAPI dependency: yield a Super Admin session connected as m369_sa_runner.
+
+    The ``m369_sa_runner`` role has BYPASSRLS — RLS policies are skipped,
+    so the session sees every tenant's rows. Use ONLY for Super Admin
+    endpoints (verified by ``get_super_admin_context``).
+
+    The session's ``info["is_super_admin"]`` flag is set so the
+    ``after_begin`` listener knows to skip re-issuing SET LOCAL
+    app.tenant_id (Super Admin has no tenant scope).
+    """
+    db = SuperAdminSessionLocal()
+    db.info["is_super_admin"] = True
     try:
         yield db
     finally:

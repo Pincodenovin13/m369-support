@@ -296,7 +296,7 @@ class Payment(Base, TimestampMixin):
     amount_paid: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # cents, actually paid
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD", server_default="USD")
     # For crypto/multi-currency
-    paid_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    paid_currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
     paid_amount_raw: Mapped[int | None] = mapped_column(Integer, nullable=True)  # raw integer from blockchain
     paid_amount_decimals: Mapped[int | None] = mapped_column(Integer, nullable=True)  # e.g. 6 for USDT TRC20
     exchange_rate: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)  # rate at tx time

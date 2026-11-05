@@ -28,11 +28,14 @@ from sqlalchemy.orm import Session
 
 # Runtime: m369_app (least-privilege)
 # Setup/migration: postgres (superuser)
+# Super Admin runtime: m369_sa_runner (BYPASSRLS, NOSUPERUSER)
 M369_APP_DB_URL = "postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support_test"
 SETUP_DB_URL = "postgresql+psycopg://postgres@localhost:5432/m369_support_test"
+SA_DB_URL = "postgresql+psycopg://m369_sa_runner:m369_sa_runner_dev_password@localhost:5432/m369_support_test"
 
 os.environ["DATABASE_URL"] = M369_APP_DB_URL
 os.environ["TEST_DATABASE_URL"] = SETUP_DB_URL
+os.environ["DATABASE_URL_SUPER_ADMIN"] = SA_DB_URL
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("ENVIRONMENT", "test")
 
@@ -79,7 +82,7 @@ def db_engine():
     if not HAVE_PG:
         pytest.fail("PostgreSQL test database unavailable — cannot run security tests")
 
-    # Clean slate: drop schema, recreate, ensure m369_app role exists
+    # Clean slate: drop schema, recreate, ensure m369_app + m369_sa_runner exist
     with setup_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE")
         conn.exec_driver_sql("CREATE SCHEMA public")
@@ -92,6 +95,18 @@ def db_engine():
             "EXCEPTION WHEN duplicate_object THEN ALTER ROLE m369_app NOSUPERUSER NOBYPASSRLS NOCREATEROLE; END $$"
         )
         conn.exec_driver_sql("GRANT ALL ON SCHEMA public TO m369_app")
+
+        # Ensure m369_sa_runner exists (LOGIN, BYPASSRLS, NOSUPERUSER)
+        # Migration 0008 attempts to create it but cannot set its password,
+        # so we provision the password here for tests.
+        conn.exec_driver_sql(
+            "DO $$ BEGIN CREATE ROLE m369_sa_runner LOGIN PASSWORD 'm369_sa_runner_dev_password' "
+            "NOSUPERUSER BYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION; "
+            "EXCEPTION WHEN duplicate_object THEN "
+            "ALTER ROLE m369_sa_runner LOGIN PASSWORD 'm369_sa_runner_dev_password' "
+            "NOSUPERUSER BYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION; END $$"
+        )
+        conn.exec_driver_sql("GRANT ALL ON SCHEMA public TO m369_sa_runner")
 
     # Run Alembic migration as postgres (superuser — owns tables)
     api_dir = Path(__file__).resolve().parents[1]
@@ -150,6 +165,26 @@ def setup_session(db_engine) -> Iterator[Session]:
                 "workspaces, agencies, super_admins, super_admin_audit_logs "
                 "RESTART IDENTITY CASCADE"
             )
+            # Re-seed the 4 default plans (migration 0006 originally seeds
+            # them with ON CONFLICT DO NOTHING, but TRUNCATE wipes them and
+            # the migration doesn't re-run between tests).
+            c.exec_driver_sql(
+                "INSERT INTO plans (id, name, display_name, price_monthly, currency, is_active, sort_order, features, limits, trial_days) "
+                "VALUES "
+                "(gen_random_uuid(), 'starter', 'Starter', 1900, 'USD', true, 1, "
+                "'{\"channels\":[\"widget\"]}'::jsonb, "
+                "'{\"max_seats\":3,\"max_conversations\":500,\"max_workspaces\":1}'::jsonb, 7), "
+                "(gen_random_uuid(), 'growth', 'Growth', 4900, 'USD', true, 2, "
+                "'{\"channels\":[\"widget\",\"whatsapp_cloud\"]}'::jsonb, "
+                "'{\"max_seats\":6,\"max_conversations\":2000,\"max_workspaces\":3}'::jsonb, 7), "
+                "(gen_random_uuid(), 'pro', 'Pro', 7900, 'USD', true, 3, "
+                "'{\"channels\":[\"widget\",\"whatsapp_cloud\",\"email\",\"telegram\"]}'::jsonb, "
+                "'{\"max_seats\":9,\"max_conversations\":6000,\"max_workspaces\":5}'::jsonb, 7), "
+                "(gen_random_uuid(), 'vip', 'VIP', 9900, 'USD', true, 4, "
+                "'{\"channels\":[\"widget\",\"whatsapp_cloud\",\"email\",\"telegram\",\"instagram\",\"messenger\"],\"whitelabel\":true}'::jsonb, "
+                "'{\"max_seats\":12,\"max_conversations\":15000,\"max_workspaces\":99}'::jsonb, 7) "
+                "ON CONFLICT (name) DO NOTHING"
+            )
         conn.close()
 
 
@@ -171,7 +206,12 @@ def db_session(db_engine) -> Iterator[Session]:
 
 @pytest.fixture
 def client(setup_session: Session, db_session: Session) -> Iterator[TestClient]:
-    """FastAPI TestClient with get_db overridden to use the test session (m369_app)."""
+    """FastAPI TestClient with get_db overridden to use the test session (m369_app).
+
+    For Super Admin endpoints we DON'T override get_super_admin_db — the
+    super_admin_engine connects via DATABASE_URL_SUPER_ADMIN env var to
+    the real m369_sa_runner role, exercising the actual BYPASSRLS path.
+    """
     def _override_get_db():
         try:
             yield db_session
@@ -182,6 +222,52 @@ def client(setup_session: Session, db_session: Session) -> Iterator[TestClient]:
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Super Admin fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def sa_engine():
+    """Engine connected as m369_sa_runner (BYPASSRLS). Used for SA assertions."""
+    return create_engine(SA_DB_URL, pool_pre_ping=True)
+
+
+@pytest.fixture
+def super_admin(setup_session: Session):
+    """Create a Super Admin + return (admin, token)."""
+    from app.models import SuperAdmin
+    from app.security import create_access_token, hash_password
+
+    admin = SuperAdmin(
+        email=f"sa-{uuid.uuid4().hex[:6]}@m369.platform",
+        name="Super Admin",
+        password_hash=hash_password("super-admin-password-123"),
+        is_active=True,
+    )
+    setup_session.add(admin)
+    setup_session.commit()
+    setup_session.refresh(admin)
+    token = create_access_token(subject=str(admin.id), token_type="super_admin")
+    return admin, token
+
+
+@pytest.fixture
+def sa_token(super_admin):
+    return super_admin[1]
+
+
+@pytest.fixture
+def sa_client(client):
+    """Same TestClient, just a clearer name when used for Super Admin tests.
+
+    The TestClient uses cookies to carry the Super Admin token (the auth
+    endpoint sets it automatically). For raw header auth, pass the token
+    explicitly in the Authorization header.
+    """
+    return client
 
 
 def _register_agency(setup_session: Session, name: str, email: str, password: str = "test-password-123") -> tuple[Agency, User, str]:

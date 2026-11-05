@@ -19,6 +19,7 @@ services:
       POSTGRES_DB: m369_support
       POSTGRES_HOST_AUTH_METHOD: scram-sha-256
       M369_APP_PASSWORD: ${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set}
+      M369_SA_RUNNER_PASSWORD: ${M369_SA_RUNNER_PASSWORD:?M369_SA_RUNNER_PASSWORD must be set}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -60,6 +61,9 @@ services:
     container_name: m369_api
     environment:
       DATABASE_URL: postgresql+psycopg://m369_app:${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set}@db:5432/m369_support
+      # Super Admin operations need BYPASSRLS — separate password, never
+      # shared with the migration service.
+      DATABASE_URL_SUPER_ADMIN: postgresql+psycopg://m369_sa_runner:${M369_SA_RUNNER_PASSWORD:?M369_SA_RUNNER_PASSWORD must be set}@db:5432/m369_support
       REDIS_URL: redis://redis:6379/0
 
       ENVIRONMENT: ${ENVIRONMENT:-development}

@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     test_database_url: str = Field(
         default="postgresql+psycopg://postgres@localhost:5432/m369_support_test"
     )
+    # Super Admin operations: separate engine, BYPASSRLS but NOSUPERUSER.
+    # NEVER shared with the migration service. In dev the URL is derived
+    # from database_url; production MUST override via env var.
+    database_url_super_admin: str = Field(
+        default="postgresql+psycopg://m369_sa_runner:m369_sa_runner_dev_password@localhost:5432/m369_support"
+    )
 
     # --- JWT ---
     jwt_secret_key: str = Field(
@@ -116,6 +122,8 @@ class Settings(BaseSettings):
             violations.append("ENCRYPTION_KEY is a dev default")
         if any(frag in self.database_url for frag in _DEV_DB_PASSWORD_FRAGMENTS):
             violations.append("DATABASE_URL contains a dev-only password")
+        if "m369_sa_runner_dev_password" in self.database_url_super_admin:
+            violations.append("DATABASE_URL_SUPER_ADMIN contains a dev-only password")
         if not self.cookie_secure:
             violations.append("COOKIE_SECURE is false")
         if violations:

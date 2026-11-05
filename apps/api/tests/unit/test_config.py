@@ -160,6 +160,7 @@ def test_production_guard_passes_with_real_secrets():
     real_super_admin_secret = "another-real-production-super-admin-secret-that-is-also-not-dev-default-64chars!!"
     real_encryption_key = "a-real-production-encryption-key-that-is-32-bytes-base64-url-safe-aabbccddeeff0011223344"
     real_db_url = "postgresql+psycopg://m369_app:a-real-production-password@db:5432/m369_support"
+    real_sa_db_url = "postgresql+psycopg://m369_sa_runner:a-real-production-sa-password@db:5432/m369_support"
 
     from app.core.config import get_settings
     get_settings.cache_clear()
@@ -170,6 +171,7 @@ def test_production_guard_passes_with_real_secrets():
         "JWT_SUPER_ADMIN_SECRET_KEY": real_super_admin_secret,
         "ENCRYPTION_KEY": real_encryption_key,
         "DATABASE_URL": real_db_url,
+        "DATABASE_URL_SUPER_ADMIN": real_sa_db_url,
         "COOKIE_SECURE": "true",
     }, clear=False):
         from app.core.config import Settings

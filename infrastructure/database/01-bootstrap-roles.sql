@@ -37,3 +37,28 @@ GRANT ALL ON SCHEMA public TO m369_app;
 -- Create test database
 SELECT 'CREATE DATABASE m369_support_test OWNER postgres'
 WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'm369_support_test')\gexec
+
+-- ---------------------------------------------------------------------------
+-- m369_sa_runner: Super Admin operations role (LOGIN, BYPASSRLS, NOSUPERUSER)
+-- ---------------------------------------------------------------------------
+-- Used by the Super Admin API endpoints via the super_admin_engine.
+-- Distinct password from m369_app — NEVER shared with the migration service
+-- or the ordinary API runtime.
+\getenv m369_sa_runner_password M369_SA_RUNNER_PASSWORD
+
+SELECT format(
+    'CREATE ROLE m369_sa_runner LOGIN PASSWORD %L NOSUPERUSER BYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION',
+    :'m369_sa_runner_password'
+)
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_roles WHERE rolname = 'm369_sa_runner'
+)
+\gexec
+
+SELECT format(
+    'ALTER ROLE m369_sa_runner WITH LOGIN PASSWORD %L NOSUPERUSER BYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION',
+    :'m369_sa_runner_password'
+)
+\gexec
+
+GRANT ALL ON SCHEMA public TO m369_sa_runner;

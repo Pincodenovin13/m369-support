@@ -64,6 +64,13 @@ def create_app() -> FastAPI:
     app.include_router(canned_responses.router, prefix="/api/v1")
     app.include_router(audit_logs.router, prefix="/api/v1")
     app.include_router(super_admin.auth.router, prefix="/api/v1")
+    app.include_router(super_admin.agencies.router, prefix="/api/v1")
+    app.include_router(super_admin.plans.router, prefix="/api/v1")
+    app.include_router(super_admin.subscriptions.router, prefix="/api/v1")
+    app.include_router(super_admin.payments.router, prefix="/api/v1")
+    app.include_router(super_admin.settings_notes_audit.settings_router, prefix="/api/v1")
+    app.include_router(super_admin.settings_notes_audit.notes_router, prefix="/api/v1")
+    app.include_router(super_admin.settings_notes_audit.audit_router, prefix="/api/v1")
 
     @app.get("/health", tags=["System"])
     def root_health():
