@@ -1,0 +1,13 @@
+M369 SUPPORT — CONNECTION VERIFICATION MARKER
+
+This file is a connection test marker created by Z.ai (M369 Engineer).
+
+Purpose:
+  - Verify GitHub push capability
+  - Verify branch creation on Pincodenovin13/m369-support
+  - Verify secure token handling via GIT_ASKPASS
+
+Created at: 2026-11-05
+Branch: test/marker
+
+This file can be deleted after verification.
