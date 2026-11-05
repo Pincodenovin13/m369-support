@@ -158,10 +158,8 @@ def test_refresh_preserves_agency_context(client: TestClient, setup_session: Ses
 def test_refresh_cannot_switch_agency(client: TestClient, setup_session: Session, agency_a, agency_b):
     """Refresh token for agency A must NOT produce access token for agency B.
 
-    The RefreshRequest schema no longer has an agency_id field.
-    Sending agency_id in the body should be ignored (extra fields are
-    rejected by Pydantic with extra='forbid' or simply ignored).
-    The agency_id comes ONLY from the signed refresh token.
+    Even if agency_id for B is included in the request body, the refresh
+    endpoint must ignore it — agency_id comes ONLY from the signed refresh token.
     """
     agency_a_obj, _, _ = agency_a
     agency_b_obj, _, _ = agency_b
@@ -186,16 +184,25 @@ def test_refresh_cannot_switch_agency(client: TestClient, setup_session: Session
     refresh_token = r.cookies.get("refresh_token")
     assert refresh_token is not None
 
-    # Try to refresh — the response should be for agency A, NOT B
-    r2 = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
-    assert r2.status_code == 200, f"Expected 200, got {r2.status_code}: {r2.text}"
-
-    new_access = r2.json()["access_token"]
-    r3 = client.get("/api/v1/agencies/current", headers={"Authorization": f"Bearer {new_access}"})
-    assert r3.status_code == 200
-    assert r3.json()["id"] == str(agency_a_obj.id), (
-        f"Refresh switched agency! Expected {agency_a_obj.id}, got {r3.json()['id']}"
-    )
+    # Try to refresh — include agency_id for B in the body (should be ignored or rejected)
+    r2 = client.post("/api/v1/auth/refresh", json={
+        "refresh_token": refresh_token,
+        "agency_id": str(agency_b_obj.id),  # Attempt to switch to B
+    })
+    # Pydantic may reject the extra field (422) or ignore it (200)
+    # Either way, the result must NOT be an access token for agency B
+    if r2.status_code == 200:
+        new_access = r2.json()["access_token"]
+        r3 = client.get("/api/v1/agencies/current", headers={"Authorization": f"Bearer {new_access}"})
+        assert r3.status_code == 200
+        assert r3.json()["id"] == str(agency_a_obj.id), (
+            f"Refresh switched agency! Expected {agency_a_obj.id}, got {r3.json()['id']}"
+        )
+    elif r2.status_code == 422:
+        # Pydantic rejected the extra field — acceptable
+        pass
+    else:
+        pytest.fail(f"Unexpected status {r2.status_code}: {r2.text}")
 
 
 def test_refresh_rejects_wrong_scope(client: TestClient, setup_session: Session):
@@ -465,12 +472,18 @@ def test_m369_app_can_execute_login_helper_function(db_engine):
 
 
 def test_login_helper_function_is_security_definer(db_engine):
-    """Function must have prosecdef=true (SECURITY DEFINER)."""
+    """Function must have prosecdef=true (SECURITY DEFINER), restricted search_path,
+    and be owned by m369_login_reader (NOT postgres/superuser)."""
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT p.prosecdef, p.proconfig, pg_get_userbyid(p.proowner)
+                SELECT
+                    p.proname,
+                    pg_get_userbyid(p.proowner) AS function_owner,
+                    p.prosecdef,
+                    p.proconfig,
+                    p.proacl::text
                 FROM pg_proc p
                 JOIN pg_namespace n ON n.oid = p.pronamespace
                 WHERE n.nspname = 'public'
@@ -478,11 +491,109 @@ def test_login_helper_function_is_security_definer(db_engine):
             """)
             row = cur.fetchone()
             assert row is not None, "Function not found"
-            prosecdef, proconfig, owner = row
+            proname, owner, prosecdef, proconfig, proacl = row
             assert prosecdef is True, f"prosecdef={prosecdef}, expected True"
-            assert owner == "postgres", f"Function owner is {owner}, expected postgres"
-            # Verify search_path is restricted
+            assert owner == "m369_login_reader", (
+                f"Function owner is {owner}, expected m369_login_reader — "
+                f"postgres (superuser) must NOT own this function"
+            )
             assert proconfig is not None, "proconfig is NULL — search_path not set"
             assert "pg_catalog" in str(proconfig), f"search_path does not include pg_catalog: {proconfig}"
+    finally:
+        conn.close()
+
+
+def test_login_helper_function_owner_is_least_privilege(db_engine):
+    """m369_login_reader must be NOLOGIN, NOSUPERUSER, BYPASSRLS, NOCREATEROLE, NOCREATEDB."""
+    conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT rolcanlogin, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb
+                FROM pg_roles WHERE rolname = 'm369_login_reader'
+            """)
+            row = cur.fetchone()
+            assert row is not None, "m369_login_reader role not found"
+            canlogin, is_super, has_bypass, can_create_role, can_create_db = row
+            assert not canlogin, "m369_login_reader must be NOLOGIN"
+            assert not is_super, "m369_login_reader must be NOSUPERUSER"
+            assert has_bypass, "m369_login_reader must have BYPASSRLS (to read RLS tables)"
+            assert not can_create_role, "m369_login_reader must be NOCREATEROLE"
+            assert not can_create_db, "m369_login_reader must be NOCREATEDB"
+    finally:
+        conn.close()
+
+
+def test_m369_app_is_not_member_of_login_reader(db_engine):
+    """m369_app must NOT be a member of m369_login_reader — cannot SET ROLE."""
+    conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT r.rolname
+                FROM pg_auth_members m
+                JOIN pg_roles r ON r.oid = m.member
+                JOIN pg_roles parent ON parent.oid = m.roleid
+                WHERE parent.rolname = 'm369_login_reader'
+                  AND r.rolname = 'm369_app'
+            """)
+            row = cur.fetchone()
+            assert row is None, (
+                f"m369_app is a member of m369_login_reader — "
+                f"runtime role can SET ROLE to escalate"
+            )
+    finally:
+        conn.close()
+
+
+def test_login_reader_has_only_select_on_required_tables(db_engine):
+    """m369_login_reader must have SELECT only on agency_memberships and agencies."""
+    conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
+    try:
+        with conn.cursor() as cur:
+            # Check SELECT on the two required tables
+            for table in ["agency_memberships", "agencies"]:
+                cur.execute(
+                    "SELECT has_table_privilege('m369_login_reader', %s, 'SELECT')",
+                    (table,),
+                )
+                assert cur.fetchone()[0], f"m369_login_reader lacks SELECT on {table}"
+
+            # Check NO INSERT/UPDATE/DELETE on those tables
+            for table in ["agency_memberships", "agencies"]:
+                for priv in ["INSERT", "UPDATE", "DELETE"]:
+                    cur.execute(
+                        "SELECT has_table_privilege('m369_login_reader', %s, %s)",
+                        (table, priv),
+                    )
+                    assert not cur.fetchone()[0], (
+                        f"m369_login_reader has {priv} on {table} — should only have SELECT"
+                    )
+
+            # Check NO access to other tenant tables
+            for table in ["workspaces", "contacts", "conversations", "audit_logs", "teams", "team_memberships"]:
+                cur.execute(
+                    "SELECT has_table_privilege('m369_login_reader', %s, 'SELECT')",
+                    (table,),
+                )
+                assert not cur.fetchone()[0], (
+                    f"m369_login_reader has SELECT on {table} — should not have access"
+                )
+    finally:
+        conn.close()
+
+
+def test_login_reader_has_no_create_on_public_schema(db_engine):
+    """m369_login_reader must NOT have CREATE on schema public."""
+    conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT has_schema_privilege('m369_login_reader', 'public', 'CREATE')")
+            assert not cur.fetchone()[0], (
+                "m369_login_reader has CREATE on schema public — should not"
+            )
+            # But should have USAGE
+            cur.execute("SELECT has_schema_privilege('m369_login_reader', 'public', 'USAGE')")
+            assert cur.fetchone()[0], "m369_login_reader should have USAGE on schema public"
     finally:
         conn.close()
