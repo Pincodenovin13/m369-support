@@ -176,3 +176,48 @@ def test_api_depends_on_migration_completed():
         f"API depends_on migration condition is {migration_dep} — "
         f"expected service_completed_successfully"
     )
+
+
+def test_api_receives_database_url_super_admin():
+    """API must receive DATABASE_URL_SUPER_ADMIN (m369_sa_runner).
+
+    This is a separate connection with BYPASSRLS — distinct password from
+    m369_app, never shared with the migration service.
+    """
+    compose = _load_compose()
+    api = _get_service(compose, "api")
+    api_env = _get_environment(api, "api")
+    sa_url = api_env.get("DATABASE_URL_SUPER_ADMIN", "")
+    assert sa_url, "API missing DATABASE_URL_SUPER_ADMIN"
+    assert "m369_sa_runner" in sa_url, (
+        f"DATABASE_URL_SUPER_ADMIN must use m369_sa_runner role: {sa_url}"
+    )
+    # The credential portion (between :// and @) must be m369_sa_runner, not postgres.
+    cred = sa_url.split("://", 1)[1].split("@", 1)[0] if "://" in sa_url else ""
+    assert "postgres" not in cred, (
+        f"DATABASE_URL_SUPER_ADMIN uses postgres credential: {cred}"
+    )
+
+
+def test_migration_does_not_receive_super_admin_url():
+    """Migration service must NOT receive DATABASE_URL_SUPER_ADMIN.
+
+    Only the API process needs BYPASSRLS access. The migration runner
+    connects as postgres (which already has all privileges).
+    """
+    compose = _load_compose()
+    migration = _get_service(compose, "migration")
+    migration_env = _get_environment(migration, "migration")
+    assert "DATABASE_URL_SUPER_ADMIN" not in migration_env, (
+        "Migration service has DATABASE_URL_SUPER_ADMIN — credential leak"
+    )
+
+
+def test_db_service_receives_sa_runner_password():
+    """DB service must receive M369_SA_RUNNER_PASSWORD via bootstrap SQL."""
+    compose = _load_compose()
+    db = _get_service(compose, "db")
+    db_env = _get_environment(db, "db")
+    assert "M369_SA_RUNNER_PASSWORD" in db_env, (
+        "DB service missing M369_SA_RUNNER_PASSWORD — bootstrap SQL cannot provision the role"
+    )
