@@ -4,6 +4,7 @@
 #
 # SECURITY: The API service only receives DATABASE_URL (m369_app).
 # The migration service receives the postgres credential.
+# No env_file is used for migration or api — all vars are explicit.
 # No privileged credential is available to the API process.
 
 name: m369-support
@@ -44,8 +45,6 @@ services:
       context: ./apps/api
       dockerfile: Dockerfile
     container_name: m369_migration
-    env_file:
-      - .env
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/m369_support
     depends_on:
@@ -59,11 +58,33 @@ services:
       context: ./apps/api
       dockerfile: Dockerfile
     container_name: m369_api
-    env_file:
-      - .env
     environment:
       DATABASE_URL: postgresql+psycopg://m369_app:${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set}@db:5432/m369_support
       REDIS_URL: redis://redis:6379/0
+
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-false}
+
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+      JWT_SUPER_ADMIN_SECRET_KEY: ${JWT_SUPER_ADMIN_SECRET_KEY:?JWT_SUPER_ADMIN_SECRET_KEY must be set}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_ACCESS_TOKEN_MINUTES: ${JWT_ACCESS_TOKEN_MINUTES:-10080}
+      JWT_REFRESH_TOKEN_DAYS: ${JWT_REFRESH_TOKEN_DAYS:-30}
+
+      ARGON2_TIME_COST: ${ARGON2_TIME_COST:-3}
+      ARGON2_MEMORY_COST: ${ARGON2_MEMORY_COST:-65536}
+      ARGON2_PARALLELISM: ${ARGON2_PARALLELISM:-2}
+
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set}
+
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:8000}
+
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

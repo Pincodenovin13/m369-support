@@ -28,6 +28,13 @@ _DEV_DEFAULTS = {
     "dev-only-change-this-key-please-32-bytes-base64",
 }
 
+# Known dev-only database password fragments
+_DEV_DB_PASSWORD_FRAGMENTS = (
+    "m369_app_dev_password",
+    "change-this-local-runtime-password",
+    "change-this-local-development-password",
+)
+
 
 class Settings(BaseSettings):
     """Centralised settings. A single instance per process via ``get_settings``."""
@@ -98,8 +105,8 @@ class Settings(BaseSettings):
             violations.append("JWT_SUPER_ADMIN_SECRET_KEY is a dev default")
         if self.encryption_key in _DEV_DEFAULTS:
             violations.append("ENCRYPTION_KEY is a dev default")
-        if "m369_app_dev_password" in self.database_url:
-            violations.append("DATABASE_URL contains dev password")
+        if any(frag in self.database_url for frag in _DEV_DB_PASSWORD_FRAGMENTS):
+            violations.append("DATABASE_URL contains a dev-only password")
         if not self.cookie_secure:
             violations.append("COOKIE_SECURE is false")
         if violations:
