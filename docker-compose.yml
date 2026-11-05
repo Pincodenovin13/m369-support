@@ -13,6 +13,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: m369_support
       POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      M369_APP_PASSWORD: ${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set in .env}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -42,8 +43,8 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+psycopg://m369_app:${M369_APP_PASSWORD:-m369_app_dev_password}@db:5432/m369_support
-      TEST_DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/m369_support_test
+      DATABASE_URL: postgresql+psycopg://m369_app:${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set in .env}@db:5432/m369_support
+      MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/m369_support
       REDIS_URL: redis://redis:6379/0
     ports:
       - "127.0.0.1:8000:8000"
@@ -55,8 +56,8 @@ services:
     volumes:
       - ./apps/api:/app
     command: >
-      sh -c "alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c 'DATABASE_URL="$$MIGRATION_DATABASE_URL" alembic upgrade head &&
+             exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload'
 
 volumes:
   postgres_data:
