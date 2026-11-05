@@ -12,9 +12,11 @@ The flow:
    on the underlying connection. RLS policies on tenant-owned tables filter
    by this setting. ``SET LOCAL`` scopes the variable to the transaction.
 
-4. ``bypass_rls_for_super_admin`` lets Super Admin queries run without RLS.
-   It is opt-in: a Super Admin route that does not call this will see *no*
-   tenant data, not all of it.
+4. There is NO bypass mechanism in RLS policies. The previous
+   ``app.bypass_rls`` GUC was a security vulnerability — any database user
+   could ``SET LOCAL`` it. Super Admin operations use a separate database
+   connection with a role that has the BYPASSRLS attribute (see
+   ``db/database.py`` → ``super_admin_engine``).
 
 5. ``assert_tenant_owned(record, agency_id)`` is the application-level
    ownership check. It is fail-closed: a record without ``agency_id`` is
@@ -33,7 +35,6 @@ from sqlalchemy.orm import Session
 
 
 TENANT_GUC = "app.tenant_id"
-SUPER_ADMIN_BYPASS_GUC = "app.bypass_rls"
 
 
 @dataclass(frozen=True)
@@ -64,26 +65,25 @@ class TenantContext:
         )
 
 
+# ---------------------------------------------------------------------------
+# Connection-level tenant context (RLS)
+# ---------------------------------------------------------------------------
+
+
 def set_tenant_context(db: Session, agency_id: uuid.UUID | str) -> None:
-    """Issue ``SET LOCAL app.tenant_id = '<uuid>'`` on the connection."""
+    """Issue ``SET LOCAL app.tenant_id = '<uuid>'`` on the connection.
+
+    RLS policies on tenant-owned tables read this variable in their ``USING``
+    and ``WITH CHECK`` clauses. ``SET LOCAL`` ensures the variable is reset at
+    the end of the transaction, so a pooled connection cannot leak tenant scope
+    to the next request.
+    """
     db.execute(text(f"SET LOCAL {TENANT_GUC} = '{uuid.UUID(str(agency_id))}'"))
 
 
-def bypass_rls_for_super_admin(db: Session) -> None:
-    """Allow the current transaction to bypass RLS — Super Admin only.
-
-    This is opt-in: Super Admin routes that do not call this will see *no*
-    tenant data, because no ``app.tenant_id`` is set and RLS policies fail
-    closed. Bypass requires the database role to be a member of the
-    ``m369_super_admin`` group.
-    """
-    db.execute(text(f"SET LOCAL {SUPER_ADMIN_BYPASS_GUC} = 'on'"))
-
-
 def clear_tenant_context(db: Session) -> None:
-    """Reset the connection-level tenant variables (defensive)."""
+    """Reset the connection-level tenant variable (defensive)."""
     db.execute(text(f"RESET {TENANT_GUC}"))
-    db.execute(text(f"RESET {SUPER_ADMIN_BYPASS_GUC}"))
 
 
 # ---------------------------------------------------------------------------

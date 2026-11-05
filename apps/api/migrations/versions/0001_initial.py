@@ -11,10 +11,16 @@ Design notes
 - ``super_admins`` is fully separate from ``users``: separate table, separate
   JWT signing key, separate audit log.
 - Composite foreign keys enforce cross-tenant integrity.
-- RLS is enabled on all tenant-owned tables. Policies read ``app.tenant_id``
-  (a session-local GUC set by the application per request). Super Admin can
-  bypass RLS only via ``SET LOCAL app.bypass_rls = 'on'``, which requires the
-  role ``m369_super_admin``.
+- RLS policies ONLY check ``app.tenant_id``. There is NO bypass GUC —
+  the previous ``app.bypass_rls`` was a security vulnerability (any user
+  could SET LOCAL it). Super Admin operations use a separate database
+  connection with a role that has the BYPASSRLS attribute.
+- ``m369_app`` is the runtime application role: LOGIN, NOT SUPERUSER,
+  NOT BYPASSRLS, NOT CREATEROLE. It has DML privileges but cannot
+  create roles, bypass RLS, or assume the Super Admin role.
+- ``m369_super_admin`` is a NOLOGIN role with BYPASSRLS — used only
+  via a separate connection pool for privileged operations.
+- Tables are owned by ``postgres`` (the migration role), NOT by ``m369_app``.
 - Audit logs use ``ON DELETE RESTRICT`` on agency_id: deleting an agency with
   audit history is blocked (regulatory requirement).
 """
@@ -33,12 +39,24 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # --- Extensions ---
-    op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
-    op.execute('CREATE EXTENSION IF NOT EXISTS pgcrypto')
+    # --- Roles ---
+    # m369_app: runtime application role (LOGIN, least privilege)
+    #   - NOT SUPERUSER
+    #   - NOT BYPASSRLS (cannot bypass RLS even with SET LOCAL)
+    #   - NOT CREATEROLE (cannot create or assume other roles)
+    op.execute("DO $$ BEGIN CREATE ROLE m369_app LOGIN PASSWORD 'm369_app_dev_password'; EXCEPTION WHEN duplicate_object THEN NULL; END $$")
+    op.execute("ALTER ROLE m369_app NOSUPERUSER NOBYPASSRLS NOCREATEROLE")
 
-    # --- Roles (idempotent) ---
-    op.execute("DO $$ BEGIN CREATE ROLE m369_super_admin NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$")
+    # m369_super_admin: privileged role for Super Admin operations (NOLOGIN)
+    #   - Has BYPASSRLS attribute
+    #   - Used only via a separate connection pool with m369_admin_login
+    op.execute("DO $$ BEGIN CREATE ROLE m369_super_admin NOLOGIN BYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END $$")
+
+    # m369_admin_login: LOGIN role for Super Admin connections
+    #   - Member of m369_super_admin (inherits BYPASSRLS)
+    #   - Used ONLY by the Super Admin code path
+    op.execute("DO $$ BEGIN CREATE ROLE m369_admin_login LOGIN PASSWORD 'm369_admin_dev_password'; EXCEPTION WHEN duplicate_object THEN NULL; END $$")
+    op.execute("GRANT m369_super_admin TO m369_admin_login")
 
     # --- super_admins ---
     op.create_table(
@@ -223,6 +241,15 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
 
+    # --- Grants: give m369_app and m369_admin_login DML on all tables ---
+    # The migration runner (e.g., postgres) owns the tables. m369_app gets
+    # SELECT/INSERT/UPDATE/DELETE but NOT ownership — it cannot bypass RLS.
+    # m369_admin_login gets the same DML + inherits BYPASSRLS from m369_super_admin.
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO m369_app")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO m369_admin_login")
+    op.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO m369_app")
+    op.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO m369_admin_login")
+
     # --- RLS: enable + FORCE on all tenant-owned tables ---
     tenant_tables = [
         "agencies",
@@ -239,27 +266,26 @@ def upgrade() -> None:
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
 
     # --- RLS policies ---
+    # SECURITY: Policies ONLY check app.tenant_id. There is NO bypass mechanism.
+    # The previous app.bypass_rls GUC was a vulnerability — any user could
+    # SET LOCAL it. Super Admin uses a separate connection with BYPASSRLS role.
     op.execute("""
         CREATE POLICY tenant_isolation_agencies ON agencies
         USING (
-            current_setting('app.bypass_rls', true) = 'on'
-            OR id::text = current_setting('app.tenant_id', true)
+            id::text = current_setting('app.tenant_id', true)
         )
         WITH CHECK (
-            current_setting('app.bypass_rls', true) = 'on'
-            OR id::text = current_setting('app.tenant_id', true)
+            id::text = current_setting('app.tenant_id', true)
         )
     """)
     for table in ["workspaces", "agency_memberships", "teams", "team_memberships", "contacts", "conversations", "audit_logs"]:
         op.execute(f"""
             CREATE POLICY tenant_isolation_{table} ON {table}
             USING (
-                current_setting('app.bypass_rls', true) = 'on'
-                OR agency_id::text = current_setting('app.tenant_id', true)
+                agency_id::text = current_setting('app.tenant_id', true)
             )
             WITH CHECK (
-                current_setting('app.bypass_rls', true) = 'on'
-                OR agency_id::text = current_setting('app.tenant_id', true)
+                agency_id::text = current_setting('app.tenant_id', true)
             )
         """)
 
@@ -286,4 +312,6 @@ def downgrade() -> None:
     ]:
         op.drop_table(table)
 
+    op.execute("DROP ROLE IF EXISTS m369_admin_login")
     op.execute("DROP ROLE IF EXISTS m369_super_admin")
+    op.execute("DROP ROLE IF EXISTS m369_app")

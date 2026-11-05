@@ -89,7 +89,7 @@ class SuperAdmin(Base, TimestampMixin):
 
     Identity table is fully separate from ``User``: separate JWT signing key,
     separate auth flow, separate audit log. A Super Admin bypasses RLS only
-    when ``bypass_rls_for_super_admin`` is explicitly called on the session.
+    Super Admin operations use a separate database connection with BYPASSRLS role.
     """
 
     __tablename__ = "super_admins"
