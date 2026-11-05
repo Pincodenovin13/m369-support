@@ -1,0 +1,61 @@
+# M369 Support — local development Docker Compose
+# Starts PostgreSQL 16, Redis 7, and the API container.
+# Frontend runs natively (npm run dev) for fast HMR.
+
+name: m369-support
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: m369_db
+    environment:
+      POSTGRES_USER: m369
+      POSTGRES_PASSWORD: m369_dev_password
+      POSTGRES_DB: m369_support
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U m369 -d m369_support"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: m369_redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: m369_api
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://m369:m369_dev_password@db:5432/m369_support
+      TEST_DATABASE_URL: postgresql+psycopg://m369:m369_dev_password@db:5432/m369_support_test
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps/api:/app
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+volumes:
+  postgres_data:
