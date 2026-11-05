@@ -3,17 +3,30 @@
 All secrets are loaded from environment variables. ``.env.example`` documents
 the available variables and their default (dev-only) values. Production
 deployments override these via the container's environment.
+
+SECURITY: When ``ENVIRONMENT=production``, dev defaults for JWT secrets,
+encryption key, and database URL are rejected — the app will refuse to start
+unless real secrets are provided via environment variables.
 """
 
+import sys
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 APP_DIR = Path(__file__).resolve().parents[2]
 REPO_ROOT = APP_DIR.parents[1]
+
+
+# Sentinel values that must NEVER appear in production
+_DEV_DEFAULTS = {
+    "dev-only-change-this-to-64-char-random-string-in-production-please",
+    "dev-only-super-admin-secret-change-this-too-in-production-please",
+    "dev-only-change-this-key-please-32-bytes-base64",
+}
 
 
 class Settings(BaseSettings):
@@ -71,6 +84,33 @@ class Settings(BaseSettings):
         extra="ignore",
         case_sensitive=False,
     )
+
+    @model_validator(mode="after")
+    def _reject_dev_defaults_in_production(self) -> "Settings":
+        """When ENVIRONMENT=production, refuse to start with dev defaults."""
+        if self.environment != "production":
+            return self
+
+        violations: list[str] = []
+        if self.jwt_secret_key in _DEV_DEFAULTS:
+            violations.append("JWT_SECRET_KEY is a dev default")
+        if self.jwt_super_admin_secret_key in _DEV_DEFAULTS:
+            violations.append("JWT_SUPER_ADMIN_SECRET_KEY is a dev default")
+        if self.encryption_key in _DEV_DEFAULTS:
+            violations.append("ENCRYPTION_KEY is a dev default")
+        if "m369_app_dev_password" in self.database_url:
+            violations.append("DATABASE_URL contains dev password")
+        if not self.cookie_secure:
+            violations.append("COOKIE_SECURE is false")
+        if violations:
+            print(
+                "FATAL: production environment detected but dev defaults are still set:\n"
+                + "\n".join(f"  - {v}" for v in violations)
+                + "\nSet real secrets via environment variables before starting.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        return self
 
 
 @lru_cache

@@ -1,6 +1,10 @@
 # M369 Support — local development Docker Compose
-# Starts PostgreSQL 16, Redis 7, and the API container.
+# Starts PostgreSQL 16, Redis 7, a migration runner, and the API container.
 # Frontend runs natively (npm run dev) for fast HMR.
+#
+# SECURITY: The API service only receives DATABASE_URL (m369_app).
+# The migration service receives the postgres credential.
+# No privileged credential is available to the API process.
 
 name: m369-support
 
@@ -10,10 +14,10 @@ services:
     container_name: m369_db
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: m369_support
       POSTGRES_HOST_AUTH_METHOD: scram-sha-256
-      M369_APP_PASSWORD: ${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set in .env}
+      M369_APP_PASSWORD: ${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -35,6 +39,21 @@ services:
       interval: 5s
       retries: 5
 
+  migration:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: m369_migration
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/m369_support
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
   api:
     build:
       context: ./apps/api
@@ -43,21 +62,18 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+psycopg://m369_app:${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set in .env}@db:5432/m369_support
-      MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/m369_support
+      DATABASE_URL: postgresql+psycopg://m369_app:${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set}@db:5432/m369_support
       REDIS_URL: redis://redis:6379/0
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
-      db:
-        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     volumes:
       - ./apps/api:/app
-    command: >
-      sh -c 'DATABASE_URL="$$MIGRATION_DATABASE_URL" alembic upgrade head &&
-             exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload'
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 volumes:
   postgres_data:
