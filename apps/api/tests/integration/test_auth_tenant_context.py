@@ -227,8 +227,9 @@ def test_refresh_rejects_wrong_scope(client: TestClient, setup_session: Session)
         "jti": uuid.uuid4().hex,
         "scope": "super_admin",  # Wrong scope — should be rejected
     }
-    # Sign with super_admin key (different from agency key)
-    bad_token = pyjwt.encode(payload, s.jwt_super_admin_secret_key, algorithm=s.jwt_algorithm)
+    # Sign with the agency key so the signature is valid — only the wrong
+    # scope should cause rejection, not a signature mismatch.
+    bad_token = pyjwt.encode(payload, s.jwt_secret_key, algorithm=s.jwt_algorithm)
     r = client.post("/api/v1/auth/refresh", json={"refresh_token": bad_token})
     assert r.status_code == 401, f"Expected 401, got {r.status_code}: {r.text}"
 
