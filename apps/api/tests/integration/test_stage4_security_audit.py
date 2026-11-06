@@ -749,19 +749,19 @@ def test_every_super_admin_endpoint_requires_auth(client: TestClient):
 
 
 def test_migration_chain_complete(db_engine):
-    """All 9 migrations are applied — the alembic_version table shows 0009."""
+    """All migrations through 0010 are applied — alembic_version shows 0010."""
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0009_widen_paid_currency", f"migration chain incomplete: head is {v}, expected 0009"
+            assert v == "0010_sa_auth_hardening", f"migration chain incomplete: head is {v}, expected 0010_sa_auth_hardening"
     finally:
         conn.close()
 
 
 def test_total_table_count_matches_expected(db_engine):
-    """The schema must have exactly 22 tenant + platform tables + alembic_version = 23."""
+    """After migration 0010, schema has 26 tables (23 + 3 MFA tables + alembic_version = 27)."""
     expected = {
         # Stage 1 baseline
         "agencies", "workspaces", "agency_memberships", "teams", "team_memberships",
@@ -773,6 +773,10 @@ def test_total_table_count_matches_expected(db_engine):
         "kb_categories", "kb_articles", "canned_responses",
         "plans", "subscriptions", "payments",
         "platform_settings", "agency_notes",
+        # Migration 0010 (SA auth hardening)
+        "super_admin_mfa_challenges",
+        "super_admin_used_totp_codes",
+        "super_admin_mfa_recovery_codes",
         # Alembic
         "alembic_version",
     }
@@ -785,6 +789,6 @@ def test_total_table_count_matches_expected(db_engine):
         extra = actual - expected
         assert not missing, f"missing tables: {missing}"
         assert not extra, f"unexpected extra tables: {extra}"
-        assert len(actual) == 23, f"expected 23 tables, got {len(actual)}"
+        assert len(actual) == 26, f"expected 26 tables, got {len(actual)}"
     finally:
         conn.close()

@@ -64,7 +64,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-TokenType = Literal["agency", "super_admin", "refresh"]
+TokenType = Literal["agency", "super_admin", "refresh", "mfa_challenge"]
 
 
 class TokenPayload(BaseModel):
@@ -72,6 +72,11 @@ class TokenPayload(BaseModel):
 
     ``exp`` and ``iat`` are integer Unix timestamps — PyJWT's default decoders
     expect integers, not ISO strings.
+
+    ``tver`` is the token_version claim carried by super_admin tokens.
+    The request dependency compares it against the DB row's
+    ``super_admins.token_version`` and rejects mismatches. This is the
+    server-side session revocation mechanism.
     """
 
     sub: str
@@ -82,11 +87,15 @@ class TokenPayload(BaseModel):
     aud: str
     jti: str
     agency_id: str | None = None
+    tver: int | None = None
 
 
 def _signing_key(token_type: TokenType) -> str:
     s = get_settings()
-    if token_type == "super_admin":
+    # super_admin and mfa_challenge share the super-admin signing key so
+    # the mfa_challenge decoder can verify with the same key. The ``type``
+    # claim (not the signing key) determines which decoder accepts which token.
+    if token_type in ("super_admin", "mfa_challenge"):
         return s.jwt_super_admin_secret_key
     return s.jwt_secret_key
 
@@ -96,12 +105,24 @@ def create_access_token(
     subject: str,
     token_type: TokenType = "agency",
     agency_id: str | None = None,
+    token_version: int | None = None,
     expires_in: timedelta | None = None,
 ) -> str:
-    """Issue a signed JWT. ``token_type`` controls the signing key and decoder."""
+    """Issue a signed JWT. ``token_type`` controls the signing key and decoder.
+
+    ``token_version`` is required for ``token_type="super_admin"`` — the
+    request dependency compares it against the DB row's
+    ``super_admins.token_version`` to enforce server-side session revocation.
+    """
     s = get_settings()
     now = datetime.now(timezone.utc)
-    exp_delta = expires_in or timedelta(minutes=s.jwt_access_token_minutes)
+    if token_type == "super_admin" and token_version is None:
+        raise ValueError("token_version is required for super_admin tokens")
+    if token_type == "mfa_challenge":
+        # Short TTL for MFA challenges — separate from access token TTL
+        exp_delta = expires_in or timedelta(minutes=s.super_admin_mfa_challenge_ttl_minutes)
+    else:
+        exp_delta = expires_in or timedelta(minutes=s.jwt_access_token_minutes)
     now_ts = int(now.timestamp())
     exp_ts = int((now + exp_delta).timestamp())
     payload: dict[str, Any] = {
@@ -115,6 +136,8 @@ def create_access_token(
     }
     if agency_id is not None:
         payload["agency_id"] = agency_id
+    if token_version is not None:
+        payload["tver"] = token_version
     return jwt.encode(payload, _signing_key(token_type), algorithm=s.jwt_algorithm)
 
 
@@ -187,6 +210,21 @@ def decode_access_token(token: str) -> dict[str, Any] | None:
 def decode_super_admin_token(token: str) -> dict[str, Any] | None:
     """Decode a super-admin access token."""
     return _decode(token, "super_admin")
+
+
+def decode_mfa_challenge_token(token: str) -> dict[str, Any] | None:
+    """Decode a short-lived MFA challenge token.
+
+    Challenge tokens are issued after password verification when MFA is
+    enabled. They authorize the bearer to call
+    ``/super-admin/auth/login/verify-mfa`` ONLY — the verify-mfa endpoint
+    exchanges a valid challenge + correct TOTP code for a full super_admin
+    access token.
+
+    Challenge tokens MUST NOT be accepted by ``decode_super_admin_token``
+    or by any management-endpoint dependency.
+    """
+    return _decode(token, "mfa_challenge")
 
 
 def decode_refresh_token(token: str, expected_scope: TokenType = "agency") -> dict[str, Any] | None:

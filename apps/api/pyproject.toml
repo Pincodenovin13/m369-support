@@ -26,6 +26,7 @@ dependencies = [
     "redis==5.2.1",
     "python-dotenv==1.0.1",
     "structlog==24.4.0",
+    "pyotp==2.10.0",
 ]
 
 [project.optional-dependencies]

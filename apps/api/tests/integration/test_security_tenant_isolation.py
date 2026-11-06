@@ -274,7 +274,7 @@ def test_invalid_signature_rejected():
 
 
 def test_wrong_token_type_rejected():
-    sa_token = create_access_token(subject=str(uuid.uuid4()), token_type="super_admin")
+    sa_token = create_access_token(subject=str(uuid.uuid4()), token_type="super_admin", token_version=0)
     assert decode_access_token(sa_token) is None, "Super admin token leaked through agency decoder"
 
     agency_token = create_access_token(

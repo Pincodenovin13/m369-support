@@ -398,7 +398,7 @@ def test_inactive_agency_rejected_on_api_access(client: TestClient, setup_sessio
 
 def test_super_admin_token_rejected_on_agency_endpoint(client: TestClient):
     """Super Admin token must not access agency endpoints."""
-    sa_token = create_access_token(subject=str(uuid.uuid4()), token_type="super_admin")
+    sa_token = create_access_token(subject=str(uuid.uuid4()), token_type="super_admin", token_version=0)
     r = client.get(
         "/api/v1/agencies/current",
         headers={"Authorization": f"Bearer {sa_token}"},

@@ -7,8 +7,8 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from ..db.database import get_db
-from ..models import Agency, AgencyMembership, User
+from ..db.database import get_db, get_super_admin_db
+from ..models import Agency, AgencyMembership, SuperAdmin, User
 from ..security import decode_access_token, decode_super_admin_token
 from ..tenancy.context import TenantContext
 
@@ -147,8 +147,28 @@ def require_role(*allowed_roles: str):
     return checker
 
 
-def get_super_admin_context(request: Request) -> TenantContext:
-    """Dependency that requires a Super Admin token."""
+def get_super_admin_context(
+    request: Request,
+    db: Session = Depends(get_super_admin_db),
+) -> TenantContext:
+    """Dependency that requires a valid Super Admin token AND an active account.
+
+    Per-request account validation (Phase 1 Security Hardening / Package A):
+
+    1. Token must decode with the super_admin signing key.
+    2. ``sub`` must be a valid UUID identifying a real SuperAdmin row.
+    3. ``tver`` claim must equal the DB row's ``token_version`` — this is
+       the server-side session revocation mechanism. Logout-all bumps
+       ``token_version``; all previously-issued tokens become invalid.
+    4. ``is_active`` must be true — deactivated accounts cannot use any
+       Super Admin endpoint (not just ``/me``).
+    5. On ANY database error, the request is REJECTED (401) — fail-closed.
+       A token is never accepted when we cannot verify its account state.
+
+    The DB read uses the dedicated ``super_admin_engine`` (m369_sa_runner,
+    BYPASSRLS) so the lookup is not subject to tenant RLS policies — the
+    ``super_admins`` table is global and has no RLS policy by design.
+    """
     token = request.cookies.get("super_admin_access_token")
     if not token:
         auth = request.headers.get("Authorization", "")
@@ -156,13 +176,46 @@ def get_super_admin_context(request: Request) -> TenantContext:
             token = auth[7:].strip()
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Super Admin authentication required")
+
     payload = decode_super_admin_token(token)
     if payload is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired Super Admin token")
+
     try:
         sa_id = uuid.UUID(payload["sub"])
     except (KeyError, ValueError):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed token") from None
+
+    # Extract tver claim — fail-closed if absent (legacy tokens without tver
+    # are rejected; only tokens issued after this hardening are valid).
+    tver_claim = payload.get("tver")
+    if tver_claim is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing token_version claim",
+        )
+
+    # Per-request account state check. FAIL-CLOSED on any DB error.
+    try:
+        admin = db.get(SuperAdmin, sa_id)
+    except Exception:
+        # DB error → 401, never accept token. Audit-free (we cannot write
+        # audit logs when the DB is unavailable).
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unable to verify account state",
+        ) from None
+
+    if admin is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not found")
+    if not admin.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account is deactivated")
+    # Server-side session revocation: tver claim must match DB row.
+    if admin.token_version != int(tver_claim):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+        )
 
     ctx = TenantContext(
         agency_id=None,
@@ -172,4 +225,5 @@ def get_super_admin_context(request: Request) -> TenantContext:
     )
     request.state.tenant = ctx
     request.state.super_admin_id = sa_id
+    request.state.super_admin_token_version = int(tver_claim)
     return ctx

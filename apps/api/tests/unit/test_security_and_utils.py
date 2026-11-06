@@ -43,11 +43,13 @@ def test_agency_token_round_trip():
 
 def test_super_admin_token_round_trip():
     sa_id = str(uuid.uuid4())
-    token = create_access_token(subject=sa_id, token_type="super_admin")
+    # token_version is required by the hardened create_access_token for SA tokens
+    token = create_access_token(subject=sa_id, token_type="super_admin", token_version=0)
     decoded = decode_super_admin_token(token)
     assert decoded is not None
     assert decoded["sub"] == sa_id
     assert decoded["type"] == "super_admin"
+    assert decoded["tver"] == 0
 
 
 def test_garbage_token_rejected():

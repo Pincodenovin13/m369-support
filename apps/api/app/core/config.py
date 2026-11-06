@@ -100,6 +100,31 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = Field(default=True)
     redis_url: str = Field(default="redis://localhost:6379/0")
 
+    # --- Super Admin authentication hardening (Package A) ---
+    # Brute-force protection on /super-admin/auth/login
+    sa_max_failed_logins: int = Field(default=5, ge=1, le=20)
+    sa_lockout_minutes: int = Field(default=15, ge=1, le=1440)
+    # Rate limit applied to /super-admin/auth/login (per-IP + per-account).
+    # Format: "N/minute" — slowapi parses it.
+    sa_login_rate_limit: str = Field(default="20/minute")
+    # If Redis is unreachable in production and rate_limit_enabled=true,
+    # the login endpoint returns 503 (fail-closed) rather than silently
+    # allowing unbounded attempts.
+    sa_rate_limit_fail_closed_in_prod: bool = Field(default=True)
+    # MFA challenge token TTL (minutes). Short by design.
+    super_admin_mfa_challenge_ttl_minutes: int = Field(default=5, ge=1, le=30)
+    # MFA brute-force protection (separate from password brute-force)
+    sa_mfa_max_failed_attempts: int = Field(default=5, ge=1, le=20)
+    sa_mfa_lockout_minutes: int = Field(default=15, ge=1, le=1440)
+    # TOTP configuration. RFC 6238 defaults: 30-second step, 6 digits.
+    # We allow ±1 window (i.e., accept the previous, current, or next
+    # 30-second code) to tolerate clock drift between client and server.
+    totp_step_seconds: int = Field(default=30, ge=15, le=120)
+    totp_digits: int = Field(default=6, ge=6, le=8)
+    totp_window: int = Field(default=1, ge=0, le=5)
+    # Number of recovery codes generated at MFA-enable time.
+    sa_mfa_recovery_code_count: int = Field(default=8, ge=4, le=16)
+
     model_config = SettingsConfigDict(
         env_file=(REPO_ROOT / ".env", APP_DIR / ".env"),
         env_file_encoding="utf-8",

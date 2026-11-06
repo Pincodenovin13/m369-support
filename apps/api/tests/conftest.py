@@ -157,6 +157,7 @@ def setup_session(db_engine) -> Iterator[Session]:
         with setup_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
             c.exec_driver_sql(
                 "TRUNCATE TABLE "
+                "super_admin_mfa_recovery_codes, super_admin_used_totp_codes, super_admin_mfa_challenges, "
                 "agency_notes, platform_settings, payments, subscriptions, plans, "
                 "canned_responses, kb_articles, kb_categories, channels, "
                 "message_attachments, messages, "
@@ -237,7 +238,13 @@ def sa_engine():
 
 @pytest.fixture
 def super_admin(setup_session: Session):
-    """Create a Super Admin + return (admin, token)."""
+    """Create a Super Admin + return (admin, token).
+
+    The token carries ``tver=0`` (token_version claim) — required by the
+    hardened ``get_super_admin_context`` dependency. The DB row also has
+    ``token_version=0`` (server_default from migration 0010), so the
+    request dependency will accept this token.
+    """
     from app.models import SuperAdmin
     from app.security import create_access_token, hash_password
 
@@ -250,7 +257,12 @@ def super_admin(setup_session: Session):
     setup_session.add(admin)
     setup_session.commit()
     setup_session.refresh(admin)
-    token = create_access_token(subject=str(admin.id), token_type="super_admin")
+    # token_version=0 is the default for a fresh admin row
+    token = create_access_token(
+        subject=str(admin.id),
+        token_type="super_admin",
+        token_version=admin.token_version,
+    )
     return admin, token
 
 
