@@ -45,6 +45,53 @@ from ..core.config import get_settings
 # ---------------------------------------------------------------------------
 
 
+def _get_trusted_proxies() -> frozenset[str]:
+    """Parse the ``trusted_proxy_ips`` setting into a set.
+
+    Empty string → no trusted proxies → X-Forwarded-For is NEVER trusted.
+    """
+    s = get_settings()
+    raw = s.trusted_proxy_ips.strip()
+    if not raw:
+        return frozenset()
+    return frozenset(ip.strip() for ip in raw.split(",") if ip.strip())
+
+
+def get_client_ip(request: Request) -> str:
+    """Return the real client IP for rate-limiting purposes.
+
+    Trust model:
+      - If ``trusted_proxy_ips`` is EMPTY: the API receives connections
+        directly (no reverse proxy). Use the raw socket peer IP
+        (``request.client.host``). X-Forwarded-For is NEVER trusted —
+        an attacker could otherwise spoof it.
+      - If ``trusted_proxy_ips`` is SET: only when the immediate connection
+        comes from one of those proxy IPs do we read X-Forwarded-For.
+        We take the LEFTMOST (original client) entry. If the header is
+        missing or malformed, we fall back to the peer IP.
+
+    This prevents an attacker from bypassing per-IP rate limits by
+    sending ``X-Forwarded-For: 1.2.3.4`` directly to the API when no
+    proxy is configured.
+    """
+    peer_ip = request.client.host if request.client else "unknown"
+    trusted = _get_trusted_proxies()
+    if not trusted:
+        # No proxy configured — peer IP is the real client
+        return peer_ip
+    if peer_ip not in trusted:
+        # Connection from an untrusted host — don't trust XFF
+        return peer_ip
+    # Peer IS a trusted proxy — read X-Forwarded-For
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        # Leftmost entry is the original client
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    return peer_ip
+
+
 def _ip_key(ip: str) -> str:
     """Redis key for per-IP rate limiting. SHA-256 of the client IP."""
     return f"sa_login:ip:{hashlib.sha256(ip.encode()).hexdigest()[:16]}"
@@ -204,8 +251,10 @@ def check_login_rate_limit(
     except (ValueError, IndexError):
         limit_n, window_seconds = 20, 60  # safe fallback
 
-    # Per-IP key
-    ip = request.client.host if request.client else "unknown"
+    # Per-IP key — uses get_client_ip() which respects the trusted-proxy
+    # trust boundary (only reads X-Forwarded-For when the peer is a
+    # configured trusted proxy IP).
+    ip = get_client_ip(request)
     ip_key = _ip_key(ip)
     # Per-account key
     acct_key = _account_key(email)
@@ -274,7 +323,7 @@ def check_verify_mfa_rate_limit(
     # Use half the login limit for MFA (stricter — MFA codes are 6 digits)
     mfa_limit = max(1, limit_n // 2)
 
-    ip = request.client.host if request.client else "unknown"
+    ip = get_client_ip(request)
     ip_key = f"sa_mfa_verify:ip:{hashlib.sha256(ip.encode()).hexdigest()[:16]}"
     sa_key = f"sa_mfa_verify:sa:{hashlib.sha256(str(sa_id).encode()).hexdigest()[:16]}"
 
@@ -300,6 +349,7 @@ def check_verify_mfa_rate_limit(
 __all__ = [
     "set_test_redis_client",
     "get_redis_client",
+    "get_client_ip",
     "assert_redis_available_or_fail_closed",
     "check_login_rate_limit",
     "check_verify_mfa_rate_limit",

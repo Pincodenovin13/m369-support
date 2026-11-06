@@ -99,6 +99,14 @@ class Settings(BaseSettings):
     # --- Rate limiting ---
     rate_limit_enabled: bool = Field(default=True)
     redis_url: str = Field(default="redis://localhost:6379/0")
+    # Comma-separated list of trusted reverse-proxy IPs. When the API is
+    # deployed behind Caddy/Nginx/etc., the real client IP is in the
+    # X-Forwarded-For header — but we must ONLY trust that header when the
+    # immediate connection comes from a known proxy. An attacker can
+    # otherwise spoof X-Forwarded-For to bypass per-IP rate limits.
+    # Empty string = API receives connections directly (no proxy) → use
+    # the raw socket peer IP.
+    trusted_proxy_ips: str = Field(default="")
 
     # --- Super Admin authentication hardening (Package A) ---
     # Brute-force protection on /super-admin/auth/login

@@ -61,6 +61,31 @@ from ..security import (
 # 1. Brute-force protection
 # ---------------------------------------------------------------------------
 
+#: The actual name of the unique constraint on super_admin_used_totp_codes
+#: that prevents TOTP replay. Extracted from migration 0010 — NOT invented.
+#: Used by ``is_totp_replay_error`` to distinguish a genuine TOTP replay
+#: (HTTP 409) from any other IntegrityError (which must propagate as 500).
+TOTP_REPLAY_CONSTRAINT_NAME = "uq_sa_totp_codes_sa_codehash"
+
+
+def is_totp_replay_error(exc: Exception) -> bool:
+    """Return True only if ``exc`` is a unique-constraint violation on the
+    TOTP replay table's specific constraint.
+
+    psycopg3 attaches a ``Diagnostic`` object to ``orig`` with the constraint
+    name. We check it precisely — other IntegrityErrors (FK violations,
+    check constraint violations, NOT NULL violations) must NOT be reported
+    as TOTP replays.
+    """
+    orig = getattr(exc, "orig", None)
+    if orig is None:
+        return False
+    diag = getattr(orig, "diag", None)
+    if diag is None:
+        return False
+    constraint = getattr(diag, "constraint_name", None)
+    return constraint == TOTP_REPLAY_CONSTRAINT_NAME
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -382,26 +407,27 @@ def verify_totp_code(
     if matched_window is None:
         raise HTTPException(status_code=400, detail="Invalid TOTP code")
 
-    # Replay protection — insert; unique violation → 409
+    # Replay protection — insert inside a SAVEPOINT so that a unique
+    # violation only rolls back the insert, NOT the surrounding
+    # transaction (which may already contain the consumed MFA challenge).
     code_hash = _totp_code_hash(admin.id, code, matched_window)
     try:
-        db.add(SuperAdminUsedTOTPCode(
-            super_admin_id=admin.id,
-            code_hash=code_hash,
-            window_start_ts=matched_window,
-        ))
-        db.flush()
-    except IntegrityError:
-        # Unique constraint violation on (super_admin_id, code_hash) —
-        # this is a TOTP replay. Rollback the failed INSERT and raise 409.
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="TOTP code has already been used (replay rejected)",
-        ) from None
-    # Any OTHER exception (connection error, deadlocks, etc.) propagates
-    # as a 500 — it is NOT a replay. The previous code's catch-all
-    # ``except Exception`` incorrectly reported DB errors as replays.
+        with db.begin_nested():
+            db.add(SuperAdminUsedTOTPCode(
+                super_admin_id=admin.id,
+                code_hash=code_hash,
+                window_start_ts=matched_window,
+            ))
+            db.flush()
+    except IntegrityError as exc:
+        # Only the SPECIFIC TOTP replay constraint is a 409.
+        # Other IntegrityErrors (e.g. FK violation) propagate as 500.
+        if is_totp_replay_error(exc):
+            raise HTTPException(
+                status_code=409,
+                detail="TOTP code has already been used (replay rejected)",
+            ) from None
+        raise
 
     # Cleanup: lazy-purge old replay records (older than 2x the window).
     # This keeps the table small without a separate cron.
@@ -677,6 +703,8 @@ def disable_mfa_for_admin(db: Session, *, admin: SuperAdmin, ip: str | None) -> 
 
 
 __all__ = [
+    "TOTP_REPLAY_CONSTRAINT_NAME",
+    "is_totp_replay_error",
     "is_locked",
     "is_mfa_locked",
     "record_failed_login",
