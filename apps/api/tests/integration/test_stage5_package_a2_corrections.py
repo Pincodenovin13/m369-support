@@ -111,10 +111,11 @@ def test_A2_02_other_integrity_error_not_replay(setup_session):
     """A2-02: An IntegrityError on a non-TOTP-replay constraint does NOT
     get misreported as 409 — it propagates as a 500-class error.
 
-    We trigger a NOT NULL violation on a different table (super_admins)
-    inside the same transaction, which raises IntegrityError but with a
-    different constraint_name (or none). The code must NOT catch this
-    as a TOTP replay.
+    We trigger a NOT NULL violation on a different table. After migration
+    0011, m369_sa_runner no longer has INSERT on super_admins — so we use
+    a postgres connection for the NOT NULL test (the point is to verify
+    that is_totp_replay_error() returns False for non-TOTP-replay
+    IntegrityErrors, regardless of which connection triggers them).
     """
     admin = _make_sa(setup_session)
     secret = _setup_mfa(setup_session, admin)
@@ -124,14 +125,16 @@ def test_A2_02_other_integrity_error_not_replay(setup_session):
 
     sa_engine = create_engine(SA_DB_URL)
     with SASession(sa_engine) as session:
-        # First: insert a bad row that will cause an IntegrityError on a
-        # DIFFERENT constraint (NOT NULL on super_admins.email).
-        # We do this AFTER a successful TOTP verify so the TOTP code is
-        # already consumed. Then we trigger the NOT NULL violation.
+        # First: consume the TOTP code legitimately
         sa_auth.verify_totp_code(session, admin=admin, code=code, ip=None)
+        session.commit()
 
-        # Now try to insert a super_admins row with NULL email → NOT NULL
-        # violation → IntegrityError, but constraint_name != TOTP_REPLAY_CONSTRAINT_NAME
+    # Use a postgres connection for the NOT NULL test (m369_sa_runner
+    # no longer has INSERT on super_admins after migration 0011)
+    setup_engine = create_engine("postgresql+psycopg://postgres@localhost:5432/m369_support_test")
+    with SASession(setup_engine) as session:
+        # Insert a super_admins row with NULL email → NOT NULL violation
+        # → IntegrityError, but constraint_name != TOTP_REPLAY_CONSTRAINT_NAME
         with pytest.raises(IntegrityError) as exc_info:
             session.execute(text(
                 "INSERT INTO super_admins (id, email, password_hash, name, is_active) "

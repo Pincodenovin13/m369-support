@@ -625,20 +625,53 @@ def test_sa_runner_role_attributes(db_engine):
 
 
 def test_sa_runner_has_crud_on_all_tables(db_engine):
-    """m369_sa_runner must have SELECT/INSERT/UPDATE/DELETE on every table."""
+    """m369_sa_runner must have the specific privileges it needs on each table.
+
+    After migration 0011 (Package B), m369_sa_runner is least-privilege:
+    it has SELECT/UPDATE on super_admins (not INSERT/DELETE — Super Admins
+    are created via CLI, not via API), SELECT/INSERT on audit logs (no
+    UPDATE/DELETE — audit logs are append-only), etc.
+
+    This test verifies the SPECIFIC grants from migration 0011 rather than
+    blanket CRUD on all tables.
+    """
     import psycopg
+
+    # Expected privileges per table after migration 0011
+    # (table, set_of_privileges) — derived from the GRANT statements in 0011
+    EXPECTED = {
+        "super_admins": {"SELECT", "UPDATE"},
+        "super_admin_audit_logs": {"SELECT", "INSERT"},
+        "super_admin_mfa_challenges": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+        "super_admin_mfa_recovery_codes": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+        "super_admin_used_totp_codes": {"SELECT", "INSERT", "DELETE"},
+        "agencies": {"SELECT", "UPDATE"},
+        "agency_memberships": {"SELECT", "UPDATE"},
+        "users": {"SELECT"},
+        "plans": {"SELECT", "INSERT", "UPDATE"},
+        "subscriptions": {"SELECT", "UPDATE"},
+        "payments": {"SELECT", "UPDATE"},
+        "platform_settings": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+        "agency_notes": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+    }
 
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
-            all_tables = [r[0] for r in cur.fetchall()]
-            for t in all_tables:
+            for table, expected_privs in EXPECTED.items():
                 for priv in ("SELECT", "INSERT", "UPDATE", "DELETE"):
                     cur.execute(
                         "SELECT has_table_privilege('m369_sa_runner', %s, %s)",
-                        (t, priv),
+                        (table, priv),
                     )
-                    assert cur.fetchone()[0], f"m369_sa_runner missing {priv} on {t}"
+                    has_priv = cur.fetchone()[0]
+                    if priv in expected_privs:
+                        assert has_priv, (
+                            f"m369_sa_runner missing {priv} on {table} — expected per 0011 grants"
+                        )
+                    else:
+                        assert not has_priv, (
+                            f"m369_sa_runner has {priv} on {table} — should NOT have it (least privilege)"
+                        )
     finally:
         conn.close()

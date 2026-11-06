@@ -11,5 +11,17 @@
 
 -r requirements.txt
 
-# Test-only — never installed in production
+# Test runner + plugins
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-cov==6.0.0
+
+# Linting + type checking
+ruff==0.8.4
+mypy==1.14.0
+
+# Config file parsing (pyyaml for docker-compose tests)
+pyyaml==6.0.2
+
+# Fake Redis for rate-limit tests (no real Redis needed in CI)
 fakeredis==2.34.1

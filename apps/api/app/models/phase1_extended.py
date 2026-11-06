@@ -95,14 +95,22 @@ class Message(Base, TimestampMixin, AgencyOwnedMixin):
 class MessageAttachment(Base, TimestampMixin):
     """A file attached to a message.
 
-    Owned transitively via message → conversation → agency.
-    No agency_id column — RLS is handled via the message join.
+    Owned by agency via ``agency_id`` (added in migration 0011).
+    Composite FK ``(message_id, agency_id)`` → ``messages(id, agency_id)``
+    prevents cross-tenant attachment references.
+    RLS is enabled on this table (migration 0011).
     """
 
     __tablename__ = "message_attachments"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=new_uuid)
     message_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    agency_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agencies.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)

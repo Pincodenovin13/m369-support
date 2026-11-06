@@ -471,10 +471,12 @@ TENANT_OWNED_TABLES = [
     "conversations",
     "audit_logs",
     "messages",
+    "message_attachments",
     "channels",
     "kb_categories",
     "kb_articles",
     "canned_responses",
+    "subscriptions",
     "payments",
 ]
 
@@ -755,7 +757,7 @@ def test_migration_chain_complete(db_engine):
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0010_sa_auth_hardening", f"migration chain incomplete: head is {v}, expected 0010_sa_auth_hardening"
+            assert v == "0011_tenant_isolation_hardening", f"migration chain incomplete: head is {v}, expected 0011_tenant_isolation_hardening"
     finally:
         conn.close()
 

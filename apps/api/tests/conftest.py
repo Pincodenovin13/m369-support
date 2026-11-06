@@ -107,6 +107,9 @@ def db_engine():
             "NOSUPERUSER BYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION; END $$"
         )
         conn.exec_driver_sql("GRANT ALL ON SCHEMA public TO m369_sa_runner")
+        # Migration 0011 revokes CREATE on schema from m369_sa_runner.
+        # We replicate that here so tests run with the same privileges.
+        conn.exec_driver_sql("REVOKE CREATE ON SCHEMA public FROM m369_sa_runner")
 
     # Run Alembic migration as postgres (superuser — owns tables)
     api_dir = Path(__file__).resolve().parents[1]

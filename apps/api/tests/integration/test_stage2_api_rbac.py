@@ -568,8 +568,17 @@ def test_login_reader_acl_after_migration_0007(db_engine):
 
 
 def test_m369_app_has_crud_on_all_tables(db_engine):
-    """m369_app must have SELECT/INSERT/UPDATE/DELETE on every tenant-owned table."""
+    """m369_app must have SELECT/INSERT/UPDATE/DELETE on every tenant-owned table.
+
+    After migration 0011 (Package B), m369_app NO LONGER has CRUD on
+    platform-private tables: agency_notes, platform_settings.
+    It also has only SELECT on plans (agency portal reads, doesn't write).
+    """
     import psycopg
+
+    # Tables where m369_app should NOT have full CRUD after 0011
+    PLATFORM_PRIVATE_TABLES = {"agency_notes", "platform_settings"}
+    READ_ONLY_TABLES = {"plans"}  # m369_app has SELECT only
 
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
@@ -580,11 +589,38 @@ def test_m369_app_has_crud_on_all_tables(db_engine):
             all_tables = [r[0] for r in cur.fetchall()]
             assert len(all_tables) >= 22, f"only {len(all_tables)} tables — migration incomplete"
             for t in all_tables:
-                for priv in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+                if t in PLATFORM_PRIVATE_TABLES:
+                    # m369_app must have NO privileges on platform-private tables
+                    for priv in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+                        cur.execute(
+                            "SELECT has_table_privilege('m369_app', %s, %s)",
+                            (t, priv),
+                        )
+                        assert not cur.fetchone()[0], (
+                            f"m369_app has {priv} on {t} — should be revoked (platform-private)"
+                        )
+                elif t in READ_ONLY_TABLES:
+                    # m369_app has SELECT only on plans
                     cur.execute(
-                        "SELECT has_table_privilege('m369_app', %s, %s)",
-                        (t, priv),
+                        "SELECT has_table_privilege('m369_app', %s, 'SELECT')",
+                        (t,),
                     )
-                    assert cur.fetchone()[0], f"m369_app missing {priv} on {t}"
+                    assert cur.fetchone()[0], f"m369_app missing SELECT on {t}"
+                    for priv in ("INSERT", "UPDATE", "DELETE"):
+                        cur.execute(
+                            "SELECT has_table_privilege('m369_app', %s, %s)",
+                            (t, priv),
+                        )
+                        assert not cur.fetchone()[0], (
+                            f"m369_app has {priv} on {t} — should be revoked (read-only)"
+                        )
+                else:
+                    # Full CRUD on all other tenant-owned tables
+                    for priv in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+                        cur.execute(
+                            "SELECT has_table_privilege('m369_app', %s, %s)",
+                            (t, priv),
+                        )
+                        assert cur.fetchone()[0], f"m369_app missing {priv} on {t}"
     finally:
         conn.close()

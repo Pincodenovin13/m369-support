@@ -1,9 +1,8 @@
-# M369 Support API — pinned dependencies
-# Generated for Phase 1 (Foundation + Multi-Tenancy)
+# M369 Support API — pinned production dependencies
 #
 # SECURITY: This file is installed by the production Dockerfile.
-# Do NOT add test-only dependencies (fakeredis, pytest, etc.) here —
-# they belong in requirements-dev.txt.
+# Do NOT add test-only or dev-only dependencies here.
+# Dev tools (pytest, ruff, mypy, fakeredis, etc.) belong in requirements-dev.txt.
 
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
@@ -24,12 +23,3 @@ redis==5.2.1
 python-dotenv==1.0.1
 structlog==24.4.0
 pyotp==2.10.0
-
-# Dev dependencies — used for local development + CI.
-# Production Dockerfile MUST NOT install this section.
-pytest==8.3.4
-pytest-asyncio==0.25.0
-pytest-cov==6.0.0
-ruff==0.8.4
-mypy==1.14.0
-pyyaml==6.0.2
