@@ -20,13 +20,12 @@ Money columns use NUMERIC(18,6) — never FLOAT.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
-    Float,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -41,7 +40,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db.database import Base
-from . import Agency, AgencyMembership, Contact, Conversation, Team, User, Workspace, new_uuid, now_utc, TimestampMixin, AgencyOwnedMixin
+from . import new_uuid, now_utc, TimestampMixin, AgencyOwnedMixin
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +68,11 @@ class Message(Base, TimestampMixin, AgencyOwnedMixin):
     external_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)  # channel-specific id
     delivery_status: Mapped[str | None] = mapped_column(String(20), nullable=True)  # sent|delivered|read|failed
     delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    reply_to_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reply_to_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default=text("'{}'::jsonb"))
     reaction: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
@@ -80,6 +83,14 @@ class Message(Base, TimestampMixin, AgencyOwnedMixin):
             ["conversations.id", "conversations.agency_id"],
             name="fk_messages_conversation_agency",
             ondelete="CASCADE",
+        ),
+        # Composite FK: reply_to must be in the same agency (tenant boundary)
+        # ON DELETE NO ACTION — the simple FK above handles SET NULL on delete
+        ForeignKeyConstraint(
+            ["reply_to_message_id", "agency_id"],
+            ["messages.id", "messages.agency_id"],
+            name="fk_messages_reply_to_agency",
+            ondelete="NO ACTION",
         ),
         CheckConstraint(
             "sender_type IN ('contact', 'agent', 'system', 'bot')",
@@ -118,6 +129,15 @@ class MessageAttachment(Base, TimestampMixin):
     storage_backend: Mapped[str] = mapped_column(String(20), default="local", server_default="local")
     kind: Mapped[str] = mapped_column(String(20), default="file")  # file | image | audio | video
 
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["message_id", "agency_id"],
+            ["messages.id", "messages.agency_id"],
+            name="fk_message_attachments_message_agency",
+            ondelete="CASCADE",
+        ),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Channels
@@ -143,6 +163,12 @@ class Channel(Base, AgencyOwnedMixin, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("workspace_id", "type", name="uq_channels_workspace_type"),
+        ForeignKeyConstraint(
+            ["workspace_id", "agency_id"],
+            ["workspaces.id", "workspaces.agency_id"],
+            name="fk_channels_workspace_agency",
+            ondelete="CASCADE",
+        ),
         CheckConstraint(
             "type IN ('widget', 'email', 'whatsapp_cloud', 'telegram', 'instagram', 'messenger')",
             name="ck_channels_type",
@@ -169,6 +195,18 @@ class KBCategory(Base, AgencyOwnedMixin, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("workspace_id", "slug", name="uq_kb_categories_workspace_slug"),
+        ForeignKeyConstraint(
+            ["workspace_id", "agency_id"],
+            ["workspaces.id", "workspaces.agency_id"],
+            name="fk_kb_categories_workspace_agency",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["parent_id", "workspace_id", "agency_id"],
+            ["kb_categories.id", "kb_categories.workspace_id", "kb_categories.agency_id"],
+            name="fk_kb_categories_parent_ws_agency",
+            ondelete="CASCADE",
+        ),
     )
 
 
@@ -192,6 +230,18 @@ class KBArticle(Base, AgencyOwnedMixin, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("workspace_id", "slug", name="uq_kb_articles_workspace_slug"),
+        ForeignKeyConstraint(
+            ["workspace_id", "agency_id"],
+            ["workspaces.id", "workspaces.agency_id"],
+            name="fk_kb_articles_workspace_agency",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["category_id", "workspace_id", "agency_id"],
+            ["kb_categories.id", "kb_categories.workspace_id", "kb_categories.agency_id"],
+            name="fk_kb_articles_category_ws_agency",
+            ondelete="NO ACTION",
+        ),
         Index("ix_kb_articles_workspace_published", "workspace_id", "is_published"),
     )
 
@@ -213,6 +263,12 @@ class CannedResponse(Base, AgencyOwnedMixin, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("workspace_id", "shortcut", name="uq_canned_responses_workspace_shortcut"),
+        ForeignKeyConstraint(
+            ["workspace_id", "agency_id"],
+            ["workspaces.id", "workspaces.agency_id"],
+            name="fk_canned_responses_workspace_agency",
+            ondelete="CASCADE",
+        ),
     )
 
 
@@ -320,6 +376,12 @@ class Payment(Base, TimestampMixin):
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default=text("'{}'::jsonb"))
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["subscription_id", "agency_id"],
+            ["subscriptions.id", "subscriptions.agency_id"],
+            name="fk_payments_subscription_agency",
+            ondelete="RESTRICT",
+        ),
         CheckConstraint(
             "status IN ('pending', 'verifying', 'verified', 'rejected', 'expired')",
             name="ck_payments_status",

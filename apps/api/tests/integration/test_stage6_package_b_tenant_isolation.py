@@ -113,7 +113,7 @@ def test_B_01_migration_0011_upgrade_success():
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0011_tenant_isolation_hardening", f"head is {v}, expected 0011"
+            assert v == "0012_package_b1_critical_corrections", f"head is {v}, expected 0012"
     finally:
         conn.close()
 
@@ -124,11 +124,26 @@ def test_B_01_migration_0011_upgrade_success():
 
 
 def test_B_02_migration_0011_downgrade_upgrade_roundtrip():
-    """B-02: Migration 0011 can be downgraded and re-upgraded cleanly."""
+    """B-02: Migration 0011 can be downgraded and re-upgraded cleanly.
+
+    After migration 0012, head is 0012. Downgrade -1 → 0011 (message_attachments
+    agency_id still exists). Downgrade -2 → 0010 (agency_id gone, RLS gone).
+    We downgrade -2 to verify the 0011 changes are cleanly reversible.
+    """
     api_dir = Path(__file__).resolve().parents[2]
-    # Downgrade -1 (0011 → 0010)
+    # First ensure we're at head
+    r0 = subprocess.run(
+        ["alembic", "upgrade", "head"],
+        cwd=str(api_dir),
+        capture_output=True,
+        text=True,
+        env={**os.environ, "DATABASE_URL": SETUP_DB_URL},
+    )
+    assert r0.returncode == 0, f"upgrade to head failed: {r0.stderr}"
+
+    # Downgrade to 0010 (0012 → 0011 → 0010)
     r1 = subprocess.run(
-        ["alembic", "downgrade", "-1"],
+        ["alembic", "downgrade", "0010_sa_auth_hardening"],
         cwd=str(api_dir),
         capture_output=True,
         text=True,
@@ -161,6 +176,13 @@ def test_B_02_migration_0011_downgrade_upgrade_roundtrip():
         env={**os.environ, "DATABASE_URL": SETUP_DB_URL},
     )
     assert r2.returncode == 0, f"re-upgrade failed: {r2.stderr}"
+
+    # Dispose ALL engine connection pools — the schema was dropped + recreated
+    # during this test, so existing pooled connections are stale.
+    from app.db.database import engine, super_admin_engine, super_admin_auth_engine
+    engine.dispose()
+    super_admin_engine.dispose()
+    super_admin_auth_engine.dispose()
 
 
 # ---------------------------------------------------------------------------

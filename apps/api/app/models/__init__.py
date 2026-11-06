@@ -380,6 +380,12 @@ class Conversation(Base, TimestampMixin):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
+            ["workspace_id", "agency_id"],
+            ["workspaces.id", "workspaces.agency_id"],
+            name="fk_conversations_workspace_agency",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
             ["assigned_user_id", "agency_id"],
             ["agency_memberships.user_id", "agency_memberships.agency_id"],
             name="fk_conversations_assignee_agency",

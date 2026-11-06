@@ -53,6 +53,15 @@ SuperAdminSessionLocal: sessionmaker[Session] = sessionmaker(
 )
 
 
+# Dedicated authentication-only connection (Package B.1).
+# Uses m369_sa_auth — a least-privilege role that does NOT have BYPASSRLS.
+# Used ONLY by /super-admin/auth/login and /super-admin/auth/login/verify-mfa.
+super_admin_auth_engine: Engine = _build_engine(get_settings().database_url_super_admin_auth)
+SuperAdminAuthSessionLocal: sessionmaker[Session] = sessionmaker(
+    bind=super_admin_auth_engine, autoflush=False, expire_on_commit=False
+)
+
+
 class Base(DeclarativeBase):
     """Declarative base for all SQLAlchemy models."""
 
@@ -102,6 +111,31 @@ def get_super_admin_db() -> Iterator[Session]:
     app.tenant_id (Super Admin has no tenant scope).
     """
     db = SuperAdminSessionLocal()
+    db.info["is_super_admin"] = True
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def get_super_admin_auth_db() -> Iterator[Session]:
+    """Database dependency for Super Admin login and MFA verification.
+
+    Uses ``m369_sa_auth`` — a dedicated least-privilege role that does
+    NOT have BYPASSRLS. It can only:
+      - SELECT on super_admins (read identity for password verify)
+      - UPDATE 5 specific columns (counters, lock, last_login)
+      - INSERT on super_admin_audit_logs (audit writes)
+      - Full CRUD on MFA tables (challenges, recovery codes, TOTP replay)
+
+    Used ONLY by:
+      - POST /super-admin/auth/login
+      - POST /super-admin/auth/login/verify-mfa
+
+    All other Super Admin endpoints use ``get_super_admin_db`` (m369_sa_runner,
+    BYPASSRLS) for management operations.
+    """
+    db = SuperAdminAuthSessionLocal()
     db.info["is_super_admin"] = True
     try:
         yield db

@@ -30,10 +30,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Iterable
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Payment, Subscription, SuperAdminAuditLog

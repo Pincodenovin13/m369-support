@@ -576,9 +576,17 @@ def test_m369_app_has_crud_on_all_tables(db_engine):
     """
     import psycopg
 
-    # Tables where m369_app should NOT have full CRUD after 0011
+    # Tables where m369_app should NOT have full CRUD after 0011+0012
     PLATFORM_PRIVATE_TABLES = {"agency_notes", "platform_settings"}
     READ_ONLY_TABLES = {"plans"}  # m369_app has SELECT only
+    # After migration 0012, m369_app has NO access to SA tables (login uses m369_sa_auth)
+    SA_TABLES = {
+        "super_admins",
+        "super_admin_audit_logs",
+        "super_admin_mfa_challenges",
+        "super_admin_mfa_recovery_codes",
+        "super_admin_used_totp_codes",
+    }
 
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
@@ -589,15 +597,15 @@ def test_m369_app_has_crud_on_all_tables(db_engine):
             all_tables = [r[0] for r in cur.fetchall()]
             assert len(all_tables) >= 22, f"only {len(all_tables)} tables — migration incomplete"
             for t in all_tables:
-                if t in PLATFORM_PRIVATE_TABLES:
-                    # m369_app must have NO privileges on platform-private tables
+                if t in PLATFORM_PRIVATE_TABLES or t in SA_TABLES:
+                    # m369_app must have NO privileges on platform-private + SA tables
                     for priv in ("SELECT", "INSERT", "UPDATE", "DELETE"):
                         cur.execute(
                             "SELECT has_table_privilege('m369_app', %s, %s)",
                             (t, priv),
                         )
                         assert not cur.fetchone()[0], (
-                            f"m369_app has {priv} on {t} — should be revoked (platform-private)"
+                            f"m369_app has {priv} on {t} — should be revoked"
                         )
                 elif t in READ_ONLY_TABLES:
                     # m369_app has SELECT only on plans

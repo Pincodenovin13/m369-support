@@ -20,6 +20,7 @@ services:
       POSTGRES_HOST_AUTH_METHOD: scram-sha-256
       M369_APP_PASSWORD: ${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set}
       M369_SA_RUNNER_PASSWORD: ${M369_SA_RUNNER_PASSWORD:?M369_SA_RUNNER_PASSWORD must be set}
+      M369_SA_AUTH_PASSWORD: ${M369_SA_AUTH_PASSWORD:?M369_SA_AUTH_PASSWORD must be set}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -64,6 +65,10 @@ services:
       # Super Admin operations need BYPASSRLS — separate password, never
       # shared with the migration service.
       DATABASE_URL_SUPER_ADMIN: postgresql+psycopg://m369_sa_runner:${M369_SA_RUNNER_PASSWORD:?M369_SA_RUNNER_PASSWORD must be set}@db:5432/m369_support
+      # Super Admin authentication-only connection (Package B.1).
+      # Uses m369_sa_auth — NO BYPASSRLS, least-privilege. Used ONLY by
+      # /super-admin/auth/login and /super-admin/auth/login/verify-mfa.
+      DATABASE_URL_SUPER_ADMIN_AUTH: postgresql+psycopg://m369_sa_auth:${M369_SA_AUTH_PASSWORD:?M369_SA_AUTH_PASSWORD must be set}@db:5432/m369_support
       REDIS_URL: redis://redis:6379/0
 
       ENVIRONMENT: ${ENVIRONMENT:-development}

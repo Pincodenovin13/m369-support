@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
@@ -14,7 +13,6 @@ from ....dependencies import get_super_admin_context
 from ....models import (
     Agency,
     AgencyNote,
-    Plan,
     PlatformSetting,
     SuperAdminAuditLog,
 )

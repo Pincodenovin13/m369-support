@@ -779,7 +779,7 @@ def test_migration_0010_upgrade_then_downgrade_roundtrip():
     # After Package B (migration 0011), head is 0011. Downgrade -1 → 0010
     # (MFA tables still exist). Downgrade -2 → 0009 (MFA tables gone).
     r2 = subprocess.run(
-        ["alembic", "downgrade", "-2"],
+        ["alembic", "downgrade", "0009_widen_paid_currency"],
         cwd=str(api_dir),
         capture_output=True,
         text=True,
@@ -823,13 +823,20 @@ def test_migration_0010_upgrade_then_downgrade_roundtrip():
     )
     assert r3.returncode == 0, f"re-upgrade failed: {r3.stderr}"
 
+    # Dispose ALL engine connection pools — the schema was dropped + recreated
+    # during this test, so existing pooled connections are stale.
+    from app.db.database import engine, super_admin_engine, super_admin_auth_engine
+    engine.dispose()
+    super_admin_engine.dispose()
+    super_admin_auth_engine.dispose()
+
     # Verify we're back at 0010
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()
-            assert v is not None and v[0] == "0011_tenant_isolation_hardening", (
+            assert v is not None and v[0] == "0012_package_b1_critical_corrections", (
                 f"alembic_version after re-upgrade: {v}"
             )
     finally:

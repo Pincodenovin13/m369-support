@@ -757,7 +757,7 @@ def test_migration_chain_complete(db_engine):
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0011_tenant_isolation_hardening", f"migration chain incomplete: head is {v}, expected 0011_tenant_isolation_hardening"
+            assert v == "0012_package_b1_critical_corrections", f"migration chain incomplete: head is {v}, expected 0012_package_b1_critical_corrections"
     finally:
         conn.close()
 

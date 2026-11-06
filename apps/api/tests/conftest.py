@@ -29,13 +29,16 @@ from sqlalchemy.orm import Session
 # Runtime: m369_app (least-privilege)
 # Setup/migration: postgres (superuser)
 # Super Admin runtime: m369_sa_runner (BYPASSRLS, NOSUPERUSER)
+# Super Admin auth: m369_sa_auth (NO BYPASSRLS, least-privilege)
 M369_APP_DB_URL = "postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support_test"
 SETUP_DB_URL = "postgresql+psycopg://postgres@localhost:5432/m369_support_test"
 SA_DB_URL = "postgresql+psycopg://m369_sa_runner:m369_sa_runner_dev_password@localhost:5432/m369_support_test"
+SA_AUTH_DB_URL = "postgresql+psycopg://m369_sa_auth:m369_sa_auth_dev_password@localhost:5432/m369_support_test"
 
 os.environ["DATABASE_URL"] = M369_APP_DB_URL
 os.environ["TEST_DATABASE_URL"] = SETUP_DB_URL
 os.environ["DATABASE_URL_SUPER_ADMIN"] = SA_DB_URL
+os.environ["DATABASE_URL_SUPER_ADMIN_AUTH"] = SA_AUTH_DB_URL
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("ENVIRONMENT", "test")
 
@@ -110,6 +113,19 @@ def db_engine():
         # Migration 0011 revokes CREATE on schema from m369_sa_runner.
         # We replicate that here so tests run with the same privileges.
         conn.exec_driver_sql("REVOKE CREATE ON SCHEMA public FROM m369_sa_runner")
+
+        # Ensure m369_sa_auth exists (LOGIN, NOBYPASSRLS, NOSUPERUSER)
+        # Provisioned with a known dev password for tests. In production,
+        # the bootstrap SQL provisions it via \getenv M369_SA_AUTH_PASSWORD.
+        conn.exec_driver_sql(
+            "DO $$ BEGIN CREATE ROLE m369_sa_auth LOGIN PASSWORD 'm369_sa_auth_dev_password' "
+            "NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION NOINHERIT; "
+            "EXCEPTION WHEN duplicate_object THEN "
+            "ALTER ROLE m369_sa_auth LOGIN PASSWORD 'm369_sa_auth_dev_password' "
+            "NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION NOINHERIT; END $$"
+        )
+        conn.exec_driver_sql("GRANT USAGE ON SCHEMA public TO m369_sa_auth")
+        conn.exec_driver_sql("REVOKE CREATE ON SCHEMA public FROM m369_sa_auth")
 
     # Run Alembic migration as postgres (superuser — owns tables)
     api_dir = Path(__file__).resolve().parents[1]

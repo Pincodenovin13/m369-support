@@ -34,7 +34,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ....core.config import get_settings
-from ....db.database import get_db, get_super_admin_db
+from ....db.database import get_super_admin_auth_db, get_super_admin_db
 from ....dependencies import get_super_admin_context
 from ....models import SuperAdmin, SuperAdminAuditLog
 from ....schemas import (
@@ -109,7 +109,7 @@ def login(
     payload: SuperAdminLoginRequest,
     request: Request,
     response: Response,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_super_admin_auth_db),
 ):
     """Super Admin login.
 
@@ -228,7 +228,7 @@ def verify_mfa(
     payload: SuperAdminVerifyMFARequest,
     request: Request,
     response: Response,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_super_admin_auth_db),
 ):
     """Exchange an MFA challenge + valid TOTP/recovery code for a full SA JWT.
 

@@ -62,3 +62,34 @@ SELECT format(
 \gexec
 
 GRANT ALL ON SCHEMA public TO m369_sa_runner;
+
+-- ---------------------------------------------------------------------------
+-- m369_sa_auth: Dedicated Super Admin authentication-only role
+-- ---------------------------------------------------------------------------
+-- Used ONLY by /super-admin/auth/login and /super-admin/auth/login/verify-mfa.
+-- NO BYPASSRLS — least-privilege. Password comes from environment, never source.
+
+\getenv m369_sa_auth_password M369_SA_AUTH_PASSWORD
+
+SELECT format(
+    'CREATE ROLE m369_sa_auth LOGIN PASSWORD %L '
+    'NOSUPERUSER NOBYPASSRLS NOCREATEDB '
+    'NOCREATEROLE NOREPLICATION NOINHERIT',
+    :'m369_sa_auth_password'
+)
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_roles WHERE rolname = 'm369_sa_auth'
+)
+\gexec
+
+SELECT format(
+    'ALTER ROLE m369_sa_auth WITH LOGIN PASSWORD %L '
+    'NOSUPERUSER NOBYPASSRLS NOCREATEDB '
+    'NOCREATEROLE NOREPLICATION NOINHERIT',
+    :'m369_sa_auth_password'
+)
+\gexec
+
+GRANT USAGE ON SCHEMA public TO m369_sa_auth;
+
+REVOKE CREATE ON SCHEMA public FROM m369_sa_auth;

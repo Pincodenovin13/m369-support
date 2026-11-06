@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ....db.database import get_super_admin_db
 from ....dependencies import get_super_admin_context
-from ....models import Subscription, SuperAdminAuditLog
+from ....models import Subscription
 from ....schemas import PaginatedResponse, SubscriptionOut, SubscriptionStatusUpdate
 from ....services.billing import update_subscription_status
 

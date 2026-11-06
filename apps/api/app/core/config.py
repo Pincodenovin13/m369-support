@@ -68,6 +68,18 @@ class Settings(BaseSettings):
     database_url_super_admin: str = Field(
         default="postgresql+psycopg://m369_sa_runner:m369_sa_runner_dev_password@localhost:5432/m369_support"
     )
+    # Super Admin authentication-only connection (Package B.1).
+    # Uses m369_sa_auth — a dedicated least-privilege role that does NOT
+    # have BYPASSRLS. Used ONLY by /super-admin/auth/login and
+    # /super-admin/auth/login/verify-mfa. All other SA endpoints use
+    # database_url_super_admin (m369_sa_runner, BYPASSRLS).
+    database_url_super_admin_auth: str = Field(
+        default=(
+            "postgresql+psycopg://"
+            "m369_sa_auth:m369_sa_auth_dev_password"
+            "@localhost:5432/m369_support"
+        )
+    )
 
     # --- JWT ---
     jwt_secret_key: str = Field(
@@ -157,6 +169,8 @@ class Settings(BaseSettings):
             violations.append("DATABASE_URL contains a dev-only password")
         if "m369_sa_runner_dev_password" in self.database_url_super_admin:
             violations.append("DATABASE_URL_SUPER_ADMIN contains a dev-only password")
+        if "m369_sa_auth_dev_password" in self.database_url_super_admin_auth:
+            violations.append("DATABASE_URL_SUPER_ADMIN_AUTH contains a dev-only password")
         if not self.cookie_secure:
             violations.append("COOKIE_SECURE is false")
         if violations:
