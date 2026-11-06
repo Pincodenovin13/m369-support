@@ -32,6 +32,7 @@ KEY DESIGN — no secrets in Redis keys:
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 from typing import Any
 
 import redis
@@ -49,12 +50,43 @@ def _get_trusted_proxies() -> frozenset[str]:
     """Parse the ``trusted_proxy_ips`` setting into a set.
 
     Empty string → no trusted proxies → X-Forwarded-For is NEVER trusted.
+    Each entry is validated with ``ipaddress.ip_address()`` — malformed
+    entries are silently dropped (a misconfigured proxy IP is treated as
+    "no proxy" rather than "trust everyone").
     """
     s = get_settings()
     raw = s.trusted_proxy_ips.strip()
     if not raw:
         return frozenset()
-    return frozenset(ip.strip() for ip in raw.split(",") if ip.strip())
+    result: set[str] = set()
+    for ip_str in raw.split(","):
+        ip_str = ip_str.strip()
+        if not ip_str:
+            continue
+        try:
+            ipaddress.ip_address(ip_str)
+            result.add(ip_str)
+        except ValueError:
+            # Malformed IP in config — skip it. Do NOT crash the app, but
+            # also do NOT trust anything until the operator fixes the config.
+            pass
+    return frozenset(result)
+
+
+def _validate_ip(ip_str: str) -> str | None:
+    """Validate that ``ip_str`` is a parseable IP address.
+
+    Returns the normalized string form if valid, None otherwise.
+    Uses ``ipaddress.ip_address()`` which accepts both IPv4 and IPv6.
+    Malformed values, empty strings, and non-IP hosts are rejected.
+    """
+    if not ip_str:
+        return None
+    try:
+        addr = ipaddress.ip_address(ip_str.strip())
+        return str(addr)
+    except ValueError:
+        return None
 
 
 def get_client_ip(request: Request) -> str:
@@ -67,12 +99,14 @@ def get_client_ip(request: Request) -> str:
         an attacker could otherwise spoof it.
       - If ``trusted_proxy_ips`` is SET: only when the immediate connection
         comes from one of those proxy IPs do we read X-Forwarded-For.
-        We take the LEFTMOST (original client) entry. If the header is
-        missing or malformed, we fall back to the peer IP.
+        We take the LEFTMOST (original client) entry and validate it with
+        ``ipaddress.ip_address()``. If the header is missing, empty,
+        malformed, or contains a non-IP value, we fall back to the peer IP.
 
     This prevents an attacker from bypassing per-IP rate limits by
     sending ``X-Forwarded-For: 1.2.3.4`` directly to the API when no
-    proxy is configured.
+    proxy is configured, or by sending a malformed XFF value that would
+    otherwise produce an invalid Redis key.
     """
     peer_ip = request.client.host if request.client else "unknown"
     trusted = _get_trusted_proxies()
@@ -85,10 +119,13 @@ def get_client_ip(request: Request) -> str:
     # Peer IS a trusted proxy — read X-Forwarded-For
     xff = request.headers.get("X-Forwarded-For", "")
     if xff:
-        # Leftmost entry is the original client
+        # Leftmost entry is the original client — validate it
         first = xff.split(",")[0].strip()
-        if first:
-            return first
+        validated = _validate_ip(first)
+        if validated:
+            return validated
+        # XFF was present but malformed — fall back to peer IP rather than
+        # trusting an invalid value
     return peer_ip
 
 

@@ -1,0 +1,15 @@
+# M369 Support API — development dependencies
+#
+# This file is for local development + CI ONLY.
+# The production Dockerfile installs requirements.txt — NOT this file.
+#
+# Usage:
+#   pip install -r requirements-dev.txt
+#
+# This pulls in all production deps (via -r requirements.txt) plus the
+# test-only packages listed below.
+
+-r requirements.txt
+
+# Test-only — never installed in production
+fakeredis==2.34.1

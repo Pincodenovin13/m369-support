@@ -89,6 +89,12 @@ services:
 
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
 
+      # Comma-separated list of trusted reverse-proxy IPs.
+      # Only when the immediate connection comes from one of these IPs will
+      # the API read X-Forwarded-For. Empty = no proxy (direct connections).
+      # NEVER trust arbitrary client-sent X-Forwarded-For without this.
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-}
+
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
