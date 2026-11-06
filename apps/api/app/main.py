@@ -3,9 +3,6 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 
 from .api.v1 import (
     agencies,
@@ -24,7 +21,6 @@ from .api.v1 import (
 )
 from .core.config import get_settings
 from .middleware.tenant_context import TenantContextMiddleware
-from .services.rate_limit import limiter
 
 
 def create_app() -> FastAPI:
@@ -38,14 +34,6 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if s.environment == "development" else None,
         openapi_url="/openapi.json" if s.environment == "development" else None,
     )
-
-    # Wire slowapi rate-limiter state. ``limiter`` may be None in test/dev
-    # when rate_limit_enabled=false (conftest sets this). In that case we
-    # skip the middleware entirely so test requests are never rate-limited.
-    if limiter is not None:
-        app.state.limiter = limiter
-        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-        app.add_middleware(SlowAPIMiddleware)
 
     origins = [s.frontend_url]
     if s.environment == "development":

@@ -2,17 +2,30 @@
 
 Separate JWT signing key, separate cookie name, separate audit log.
 
-Phase 1 Security Hardening / Package A adds:
+Phase 1 Security Hardening / Package A + A.1 corrections:
   - Per-request account-state validation (in ``get_super_admin_context``)
   - Server-side session revocation via ``token_version``
   - Brute-force protection (atomic counter, lockout, no email leak)
-  - Rate limiting on login (slowapi, fail-closed in production)
+  - Real Redis-based rate limiting (custom atomic INCR+EXPIRE, fail-closed)
   - Real TOTP-based MFA (setup → enable → 2-step login → replay-protected verify)
-  - Recovery codes (Argon2id-hashed, single-use)
+  - Atomic MFA challenge consumption (conditional UPDATE, race-safe)
+  - Atomic recovery code consumption (SELECT FOR UPDATE + conditional UPDATE)
+  - Independent MFA lockout (failed_mfa_attempts, not cleared on password success)
   - Logout bumps ``token_version`` (logout-all semantics)
+
+Package A.1 corrections vs Package A:
+  - Rate limit is now REAL (custom Redis limiter, not slowapi decorator)
+  - Both /login AND /login/verify-mfa are rate-limited (independent keys)
+  - MFA challenge consumption is atomic (UPDATE ... WHERE used_at IS NULL)
+  - Recovery code consumption is atomic (SELECT FOR UPDATE + conditional UPDATE)
+  - MFA lockout is independent from password lockout
+  - Password success does NOT clear failed_mfa_attempts
+  - Only MFA success clears failed_mfa_attempts
+  - TOTP IntegrityError → 409; other DB errors → 500 (not misreported as replay)
 """
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timezone
 
@@ -23,7 +36,7 @@ from sqlalchemy.orm import Session
 from ....core.config import get_settings
 from ....db.database import get_db, get_super_admin_db
 from ....dependencies import get_super_admin_context
-from ....models import SuperAdmin, SuperAdminAuditLog, SuperAdminMFAChallenge
+from ....models import SuperAdmin, SuperAdminAuditLog
 from ....schemas import (
     SuperAdminLoginRequest,
     SuperAdminMFAEnableRequest,
@@ -40,7 +53,11 @@ from ....security import (
     verify_password,
 )
 from ....services import sa_auth
-from ....services.rate_limit import assert_redis_available_or_fail_closed
+from ....services.rate_limit import (
+    assert_redis_available_or_fail_closed,
+    check_login_rate_limit,
+    check_verify_mfa_rate_limit,
+)
 
 router = APIRouter(prefix="/super-admin/auth", tags=["Super Admin Authentication"])
 
@@ -72,6 +89,16 @@ def _generic_login_error() -> HTTPException:
     return HTTPException(status_code=401, detail="Incorrect email or password")
 
 
+def _sa_out_dict(admin: SuperAdmin) -> dict:
+    """Return a minimal dict — never expose password_hash or mfa_secret_encrypted."""
+    return {
+        "id": str(admin.id),
+        "email": admin.email,
+        "name": admin.name,
+        "is_active": admin.is_active,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Login (with brute-force protection + rate limit + MFA-aware)
 # ---------------------------------------------------------------------------
@@ -87,33 +114,30 @@ def login(
     """Super Admin login.
 
     Flow:
-      1. Fail-closed check: if rate limiting is enabled + production +
-         fail-closed-on-redis-down, return 503 if Redis is unreachable.
-      2. Look up the SuperAdmin by email (case-insensitive).
-      3. If the account is currently locked → 423 Locked.
-      4. Verify password. On mismatch:
+      1. Fail-closed Redis check (production only).
+      2. Rate limit check (per-IP + per-account, independent, Redis-based).
+      3. Look up the SuperAdmin by email (case-insensitive).
+      4. If the account is currently locked → 423 Locked.
+      5. Verify password. On mismatch:
          - Record failed login (atomic counter increment)
-         - Return the SAME error as if the email didn't exist
-           (no email enumeration)
-      5. On match: clear failed-attempt counter, set last_login_at.
-      6. If MFA is enabled: issue short-lived MFA challenge token,
-         return 200 with mfa_required=true. Client must call verify-mfa.
-      7. If MFA is NOT enabled: issue full super_admin JWT with tver claim,
-         set cookie, return SuperAdminOut.
-
-    Audit log entries:
-      - super_admin.login.failed (IP + timestamp, NEVER password)
-      - super_admin.login.success (IP + timestamp)
-      - super_admin.login.locked (when lockout threshold reached)
-      - super_admin.mfa.challenge_issued (when MFA challenge issued)
+         - Return the SAME error as if the email didn't exist (no enumeration)
+      6. On match:
+         - If MFA is enabled: issue MFA challenge, return mfa_required=true.
+           Do NOT call record_successful_login yet — password success is
+           only the first step; failed_mfa_attempts must NOT be cleared.
+         - If MFA is NOT enabled: call record_successful_login (clears
+           failed_login_attempts + locked_until), issue JWT, return.
     """
     # 1. Fail-closed Redis check (production only)
     assert_redis_available_or_fail_closed(request)
 
-    # 2. Lookup
+    # 2. Rate limit check (per-IP + per-account, independent)
+    check_login_rate_limit(request, payload.email)
+
+    # 3. Lookup
     admin = db.scalar(select(SuperAdmin).where(SuperAdmin.email == payload.email.lower()))
 
-    # 3. Locked? — read lock state fresh from DB (defence against stale ORM cache)
+    # 4. Locked? — read lock state fresh from DB (defence against stale ORM cache)
     if admin is not None:
         lock_row = db.execute(
             text("SELECT locked_until FROM super_admins WHERE id = :aid"),
@@ -136,7 +160,7 @@ def login(
                     detail="Account temporarily locked. Try again later.",
                 )
 
-    # 4. Verify password — SAME error for unknown email AND wrong password
+    # 5. Verify password — SAME error for unknown email AND wrong password
     password_ok = (
         admin is not None
         and admin.password_hash
@@ -145,20 +169,15 @@ def login(
 
     if not password_ok:
         if admin is not None:
-            # Record failed attempt (atomic counter increment + audit log)
             sa_auth.record_failed_login(db, admin=admin, ip=_ip(request))
             db.commit()
-        # Identical error in both branches — no email enumeration
         raise _generic_login_error()
 
     # Password is correct. From here on we have a known admin.
-    assert admin is not None  # for type-checkers
+    assert admin is not None
 
-    # 5. Check account is_active (after password check, so the error message
-    # is identical to a wrong password — prevents enumeration of inactive accounts)
+    # 6. Check account is_active (after password check, same error as wrong password)
     if not admin.is_active:
-        # Don't reveal that the account exists-but-inactive — use the
-        # generic error. But audit-log the attempt.
         db.add(SuperAdminAuditLog(
             super_admin_id=admin.id,
             action="super_admin.login.inactive_account",
@@ -170,11 +189,15 @@ def login(
         db.commit()
         raise _generic_login_error()
 
-    # 6. Successful password verification — clear counters
-    sa_auth.record_successful_login(db, admin=admin, ip=_ip(request))
-
     # 7. MFA?
     if admin.mfa_enabled:
+        # Do NOT call record_successful_login here — password success is only
+        # the first step. failed_mfa_attempts must NOT be cleared until the
+        # second factor is verified. Only set last_login_at.
+        db.execute(
+            text("UPDATE super_admins SET last_login_at = :now WHERE id = :aid"),
+            {"now": datetime.now(timezone.utc), "aid": str(admin.id)},
+        )
         challenge_token = sa_auth.issue_mfa_challenge(db, admin=admin, ip=_ip(request))
         db.commit()
         return SuperAdminMFARequiredResponse(
@@ -183,7 +206,8 @@ def login(
             expires_in_seconds=get_settings().super_admin_mfa_challenge_ttl_minutes * 60,
         )
 
-    # 8. No MFA — issue full super_admin JWT with tver claim
+    # 8. No MFA — full login success
+    sa_auth.record_successful_login(db, admin=admin, ip=_ip(request))
     token = create_access_token(
         subject=str(admin.id),
         token_type="super_admin",
@@ -191,17 +215,11 @@ def login(
     )
     db.commit()
     _set_super_admin_cookie(response, token)
-    # Return a minimal dict that does NOT include password_hash or mfa_secret_encrypted
-    return {
-        "id": str(admin.id),
-        "email": admin.email,
-        "name": admin.name,
-        "is_active": admin.is_active,
-    }
+    return _sa_out_dict(admin)
 
 
 # ---------------------------------------------------------------------------
-# Login verify-MFA (2nd step)
+# Login verify-MFA (2nd step) — atomic challenge consumption
 # ---------------------------------------------------------------------------
 
 
@@ -214,21 +232,26 @@ def verify_mfa(
 ):
     """Exchange an MFA challenge + valid TOTP/recovery code for a full SA JWT.
 
-    The challenge token:
-      - Must decode with the super_admin signing key + type=mfa_challenge
-      - Must match a row in ``super_admin_mfa_challenges`` (by SHA-256 hash)
-      - Must not be expired
-      - Must not be already used (used_at IS NULL)
+    Race-safe via atomic conditional UPDATE on the challenge row:
 
-    The TOTP code:
-      - Must match the admin's MFA secret within the configured window
-      - Must not be a replay (unique constraint on (admin_id, code_hash))
+      UPDATE super_admin_mfa_challenges
+      SET used_at = :now
+      WHERE challenge_hash = :hash
+        AND super_admin_id = :sa_id
+        AND used_at IS NULL
+        AND expires_at > now()
+      RETURNING ...
 
-    Recovery code:
-      - Alternative to TOTP for users who lost their device
-      - Single-use; replay rejected
+    Two concurrent requests with the same challenge token cannot both
+    succeed — PostgreSQL's row-level lock ensures only one gets
+    rowcount=1; the other gets 409 (challenge already used).
 
-    On success: issue a full super_admin JWT (with tver claim), set cookie.
+    The TOTP code is replay-protected via a unique constraint on
+    (super_admin_id, code_hash). Recovery codes are consumed atomically
+    via SELECT FOR UPDATE + conditional UPDATE.
+
+    On success: clears failed_mfa_attempts, issues full super_admin JWT.
+    On failure: increments failed_mfa_attempts (independent lockout).
     """
     # Decode challenge token
     challenge_payload = decode_mfa_challenge_token(payload.mfa_challenge)
@@ -239,39 +262,65 @@ def verify_mfa(
     except (KeyError, ValueError):
         raise HTTPException(status_code=401, detail="Malformed MFA challenge") from None
 
-    # Verify the challenge row exists + is unused + not expired
-    import hashlib
-    challenge_hash = hashlib.sha256(payload.mfa_challenge.encode()).hexdigest()
-    challenge_row = db.scalar(
-        select(SuperAdminMFAChallenge).where(
-            SuperAdminMFAChallenge.super_admin_id == sa_id,
-            SuperAdminMFAChallenge.challenge_hash == challenge_hash,
-        )
-    )
-    if challenge_row is None:
-        raise HTTPException(status_code=401, detail="MFA challenge not found")
-    if challenge_row.used_at is not None:
-        raise HTTPException(status_code=409, detail="MFA challenge already used")
-    if challenge_row.expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=401, detail="MFA challenge expired")
+    # Rate limit (per-IP + per-super_admin_id, independent from login limit)
+    check_verify_mfa_rate_limit(request, sa_id)
 
-    # Load the admin
+    # Compute challenge hash
+    challenge_hash = hashlib.sha256(payload.mfa_challenge.encode()).hexdigest()
+
+    # Load the admin first — needed for MFA lock check + second factor verify
     admin = db.get(SuperAdmin, sa_id)
     if admin is None or not admin.is_active:
         raise HTTPException(status_code=401, detail="Account not found or deactivated")
 
+    # Check MFA lock (reuses locked_until — independent counter but same column)
+    if sa_auth.is_mfa_locked(admin):
+        db.add(SuperAdminAuditLog(
+            super_admin_id=admin.id,
+            action="super_admin.mfa.locked",
+            target_type="super_admin",
+            target_id=admin.id,
+            metadata_={"locked_until": admin.locked_until.isoformat() if admin.locked_until else None},
+            ip_address=_ip(request),
+        ))
+        db.commit()
+        raise HTTPException(
+            status_code=423,
+            detail="Account temporarily locked due to MFA failures. Try again later.",
+        )
+
+    # ATOMICALLY consume the challenge — this is the race-safe step.
+    # If this succeeds, no other request can use the same challenge.
+    # If the second factor fails after this, the challenge is already
+    # consumed (used_at set) — the user must re-login to get a new one.
+    # This is the correct security trade-off: we'd rather force a re-login
+    # than allow a race where two requests both pass the challenge check.
+    sa_auth.consume_mfa_challenge(db, challenge_hash=challenge_hash, sa_id=sa_id)
+
     # Verify the second factor
-    if payload.recovery_code:
-        sa_auth.consume_recovery_code(db, admin=admin, code=payload.recovery_code, ip=_ip(request))
-    elif payload.code:
-        sa_auth.verify_totp_code(db, admin=admin, code=payload.code, ip=_ip(request))
-    else:
-        raise HTTPException(status_code=400, detail="Must supply either code or recovery_code")
+    try:
+        if payload.recovery_code:
+            sa_auth.consume_recovery_code(db, admin=admin, code=payload.recovery_code, ip=_ip(request))
+        elif payload.code:
+            sa_auth.verify_totp_code(db, admin=admin, code=payload.code, ip=_ip(request))
+        else:
+            raise HTTPException(status_code=400, detail="Must supply either code or recovery_code")
+    except HTTPException as exc:
+        # Second factor failed — record it + rollback the challenge consumption
+        # (so the user can retry with the same challenge if they typed wrong).
+        # Wait — we already consumed the challenge above. If we rollback,
+        # the challenge becomes available again, which is a race window.
+        # Trade-off: we DON'T rollback. The challenge is consumed. The user
+        # must re-login. This is the safer choice.
+        # But we DO record the MFA failure + commit it (separate from the
+        # challenge consumption which is already in the txn).
+        if exc.status_code in (400, 409):
+            sa_auth.record_failed_mfa(db, admin=admin, ip=_ip(request))
+            db.commit()
+        raise
 
-    # Mark challenge as used (prevents replay)
-    challenge_row.used_at = datetime.now(timezone.utc)
-
-    # Issue full super_admin JWT with tver claim
+    # Second factor succeeded — clear failed_mfa_attempts + issue JWT
+    sa_auth.record_successful_mfa(db, admin=admin, ip=_ip(request))
     token = create_access_token(
         subject=str(admin.id),
         token_type="super_admin",
@@ -287,13 +336,7 @@ def verify_mfa(
     ))
     db.commit()
     _set_super_admin_cookie(response, token)
-    # Return minimal dict — never expose password_hash or mfa_secret_encrypted
-    return {
-        "id": str(admin.id),
-        "email": admin.email,
-        "name": admin.name,
-        "is_active": admin.is_active,
-    }
+    return _sa_out_dict(admin)
 
 
 # ---------------------------------------------------------------------------
@@ -308,18 +351,10 @@ def logout(
     db: Session = Depends(get_super_admin_db),
     ctx=Depends(get_super_admin_context),
 ):
-    """Logout — bumps token_version so all previously-issued tokens are invalidated.
-
-    This is logout-ALL semantics: every device/session of this Super Admin
-    is logged out. Cookie is also cleared client-side.
-
-    The bump is required because merely deleting the client cookie leaves
-    the JWT valid until expiry — a stolen token would still work.
-    """
+    """Logout — bumps token_version so all previously-issued tokens are invalidated."""
     sa_id: uuid.UUID = request.state.super_admin_id
     admin = db.get(SuperAdmin, sa_id)
     if admin is None:
-        # Already deleted account? Cookie is meaningless; just clear it.
         response.delete_cookie("super_admin_access_token", path="/")
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     sa_auth.bump_token_version(db, admin=admin, reason="logout", ip=_ip(request))
@@ -339,23 +374,11 @@ def me(
     db: Session = Depends(get_super_admin_db),
     ctx=Depends(get_super_admin_context),
 ):
-    """Return the current Super Admin profile.
-
-    Note: the heavy lifting (token validation, is_active check, token_version
-    check) is done by ``get_super_admin_context`` itself. By the time we
-    reach here, the admin is guaranteed active + token is fresh.
-
-    Returns ONLY the SuperAdminOut fields (id, email, name, is_active) —
-    never password_hash, mfa_secret_encrypted, or internal counters.
-    """
+    """Return the current Super Admin profile (minimal fields only)."""
     sa_id: uuid.UUID = request.state.super_admin_id
     admin = db.get(SuperAdmin, sa_id)
     if admin is None or not admin.is_active:
-        # Should not happen — get_super_admin_context already verified.
-        # But be defensive: a race condition between context check and here
-        # (admin deactivated by another request) is still fail-closed.
         raise HTTPException(status_code=401, detail="Super Admin not found")
-    # Explicitly construct SuperAdminOut to avoid leaking password_hash etc.
     return SuperAdminOut(
         id=admin.id,
         email=admin.email,
@@ -375,14 +398,7 @@ def mfa_setup(
     db: Session = Depends(get_super_admin_db),
     ctx=Depends(get_super_admin_context),
 ):
-    """Generate a new TOTP secret for the current Super Admin.
-
-    The secret is returned ONCE in plaintext so the client can render a
-    QR code. MFA is NOT yet enabled — the client must call ``/mfa/enable``
-    with a valid TOTP code from this secret to activate MFA.
-
-    The secret is stored encrypted at rest (Fernet, via ``encrypt_secret``).
-    """
+    """Generate a new TOTP secret for the current Super Admin."""
     import pyotp
     sa_id: uuid.UUID = request.state.super_admin_id
     admin = db.get(SuperAdmin, sa_id)
@@ -391,7 +407,6 @@ def mfa_setup(
     if admin.mfa_enabled:
         raise HTTPException(status_code=409, detail="MFA is already enabled — disable first to re-setup")
     secret = sa_auth.generate_mfa_secret()
-    # Build otpauth URL — NOT persisted, only returned to client
     s = get_settings()
     totp = pyotp.TOTP(secret, digits=s.totp_digits, interval=s.totp_step_seconds)
     otpauth_url = totp.provisioning_uri(name=admin.email, issuer_name="M369 Support")
@@ -408,16 +423,7 @@ def mfa_enable(
     db: Session = Depends(get_super_admin_db),
     ctx=Depends(get_super_admin_context),
 ):
-    """Activate MFA — submit a TOTP code from the just-setup secret.
-
-    On success:
-      - Persists the encrypted secret
-      - Sets mfa_enabled=true
-      - Generates ``sa_mfa_recovery_code_count`` recovery codes
-      - Returns the recovery codes (plaintext, ONE-TIME only)
-
-    After this endpoint returns, the next login will require a TOTP code.
-    """
+    """Activate MFA — submit a TOTP code from the just-setup secret."""
     import pyotp
     sa_id: uuid.UUID = request.state.super_admin_id
     admin = db.get(SuperAdmin, sa_id)
@@ -425,7 +431,6 @@ def mfa_enable(
         raise HTTPException(status_code=401, detail="Super Admin not found")
     if admin.mfa_enabled:
         raise HTTPException(status_code=409, detail="MFA is already enabled")
-    # Verify the submitted code against the submitted secret
     s = get_settings()
     totp = pyotp.TOTP(payload.secret, digits=s.totp_digits, interval=s.totp_step_seconds)
     if not totp.verify(payload.code, valid_window=s.totp_window):
@@ -447,12 +452,7 @@ def mfa_disable(
     db: Session = Depends(get_super_admin_db),
     ctx=Depends(get_super_admin_context),
 ):
-    """Disable MFA — requires a TOTP code OR recovery code.
-
-    Disabling MFA cannot be done with just the password — the caller must
-    prove possession of a second factor. This prevents an attacker who
-    stole the password from disabling MFA.
-    """
+    """Disable MFA — requires a TOTP code OR recovery code."""
     sa_id: uuid.UUID = request.state.super_admin_id
     admin = db.get(SuperAdmin, sa_id)
     if admin is None:
@@ -468,6 +468,5 @@ def mfa_disable(
     sa_auth.disable_mfa_for_admin(db, admin=admin, ip=_ip(request))
     db.commit()
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
-    # MFA was disabled — clear the access cookie so the user has to log in fresh
     response.delete_cookie("super_admin_access_token", path="/")
     return response

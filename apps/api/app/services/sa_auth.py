@@ -36,7 +36,8 @@ from datetime import datetime, timedelta, timezone
 
 import pyotp
 from fastapi import HTTPException
-from sqlalchemy import select, text
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
@@ -118,15 +119,18 @@ def record_failed_login(db: Session, *, admin: SuperAdmin, ip: str | None) -> in
 
 
 def record_successful_login(db: Session, *, admin: SuperAdmin, ip: str | None) -> None:
-    """Reset failed_login_attempts + locked_until; bump token_version BEFORE
-    issuing the new token so previously-issued tokens are invalidated
-    (defence-in-depth: even if a previous token was stolen, it cannot
-    be used after a successful login from a different location).
+    """Reset failed_login_attempts + locked_until.
 
-    NOTE: We do NOT bump token_version on every login — that would log
-    out every other concurrent session of the same Super Admin. The bump
-    is reserved for explicit logout-all / password-change / deactivation.
-    A normal login only resets the failed-attempt counter.
+    NOTE: This is called ONLY when the full login succeeds — i.e. MFA is
+    NOT enabled, or MFA is enabled but this is the password-verification
+    step only (the MFA challenge is issued but NOT yet verified).
+
+    For MFA-enabled accounts, the failed_mfa_attempts counter is NOT
+    reset here — it is only reset on successful MFA verification
+    (see ``record_successful_mfa`` below).
+
+    This prevents an attacker from clearing the MFA lockout counter by
+    simply entering the correct password.
     """
     now = _now()
     db.execute(
@@ -134,8 +138,7 @@ def record_successful_login(db: Session, *, admin: SuperAdmin, ip: str | None) -
             "UPDATE super_admins "
             "SET failed_login_attempts = 0, "
             "    locked_until = NULL, "
-            "    last_login_at = :now, "
-            "    failed_mfa_attempts = 0 "
+            "    last_login_at = :now "
             "WHERE id = :aid"
         ),
         {"now": now, "aid": str(admin.id)},
@@ -149,6 +152,82 @@ def record_successful_login(db: Session, *, admin: SuperAdmin, ip: str | None) -
         ip_address=ip,
     ))
     db.flush()
+
+
+def record_successful_mfa(db: Session, *, admin: SuperAdmin, ip: str | None) -> None:
+    """Reset failed_mfa_attempts after successful MFA verification.
+
+    Called ONLY from the verify-mfa endpoint after the second factor is
+    confirmed. This is the ONLY place failed_mfa_attempts is reset to 0.
+    """
+    db.execute(
+        text(
+            "UPDATE super_admins "
+            "SET failed_mfa_attempts = 0, "
+            "    last_login_at = :now "
+            "WHERE id = :aid"
+        ),
+        {"now": _now(), "aid": str(admin.id)},
+    )
+    db.add(SuperAdminAuditLog(
+        super_admin_id=admin.id,
+        action="super_admin.mfa.success",
+        target_type="super_admin",
+        target_id=admin.id,
+        metadata_={},
+        ip_address=ip,
+    ))
+    db.flush()
+
+
+def record_failed_mfa(db: Session, *, admin: SuperAdmin, ip: str | None) -> int:
+    """Atomically increment failed_mfa_attempts; lock if threshold reached.
+
+    Independent from the password failed-login counter. Uses the same
+    atomic UPDATE ... RETURNING pattern as ``record_failed_login``.
+
+    On reaching ``sa_mfa_max_failed_attempts``, sets a MFA-specific
+    lockout via ``locked_until`` (reusing the same column — the login
+    endpoint checks ``locked_until`` regardless of which counter
+    triggered it).
+    """
+    s = get_settings()
+    now = _now()
+    row = db.execute(
+        text(
+            "UPDATE super_admins "
+            "SET failed_mfa_attempts = failed_mfa_attempts + 1 "
+            "WHERE id = :aid "
+            "RETURNING failed_mfa_attempts"
+        ),
+        {"aid": str(admin.id)},
+    ).fetchone()
+    new_attempts = row[0] if row else admin.failed_mfa_attempts + 1
+    if new_attempts >= s.sa_mfa_max_failed_attempts:
+        lock_until = now + timedelta(minutes=s.sa_mfa_lockout_minutes)
+        db.execute(
+            text("UPDATE super_admins SET locked_until = :lu WHERE id = :aid"),
+            {"lu": lock_until, "aid": str(admin.id)},
+        )
+    db.add(SuperAdminAuditLog(
+        super_admin_id=admin.id,
+        action="super_admin.mfa.failed",
+        target_type="super_admin",
+        target_id=admin.id,
+        metadata_={"mfa_attempts": new_attempts, "locked": new_attempts >= s.sa_mfa_max_failed_attempts},
+        ip_address=ip,
+    ))
+    db.flush()
+    return new_attempts
+
+
+def is_mfa_locked(admin: SuperAdmin) -> bool:
+    """True if the account is locked due to MFA brute-force.
+
+    Reuses the same ``locked_until`` column — once locked, ALL login
+    attempts (password + MFA) are rejected until the lockout expires.
+    """
+    return admin.locked_until is not None and admin.locked_until > _now()
 
 
 # ---------------------------------------------------------------------------
@@ -312,12 +391,17 @@ def verify_totp_code(
             window_start_ts=matched_window,
         ))
         db.flush()
-    except Exception:
+    except IntegrityError:
+        # Unique constraint violation on (super_admin_id, code_hash) —
+        # this is a TOTP replay. Rollback the failed INSERT and raise 409.
         db.rollback()
         raise HTTPException(
             status_code=409,
             detail="TOTP code has already been used (replay rejected)",
         ) from None
+    # Any OTHER exception (connection error, deadlocks, etc.) propagates
+    # as a 500 — it is NOT a replay. The previous code's catch-all
+    # ``except Exception`` incorrectly reported DB errors as replays.
 
     # Cleanup: lazy-purge old replay records (older than 2x the window).
     # This keeps the table small without a separate cron.
@@ -345,6 +429,77 @@ def verify_totp_code(
 def _constant_time_eq(a: str, b: str) -> bool:
     """Constant-time string comparison (uses hmac.compare_digest)."""
     return hmac.compare_digest(a.encode(), b.encode())
+
+
+def consume_mfa_challenge(
+    db: Session,
+    *,
+    challenge_hash: str,
+    sa_id: uuid.UUID,
+) -> SuperAdminMFAChallenge:
+    """Atomically consume an MFA challenge token.
+
+    Uses a conditional UPDATE:
+
+      UPDATE super_admin_mfa_challenges
+      SET used_at = :now
+      WHERE challenge_hash = :hash
+        AND super_admin_id = :sa_id
+        AND used_at IS NULL
+        AND expires_at > now()
+      RETURNING id, expires_at
+
+    If 0 rows are returned, the challenge was either:
+      - Already used (replay) → 409
+      - Expired → 401
+      - Not found (wrong hash / wrong sa_id) → 401
+
+    This is race-safe: two concurrent requests cannot both consume the
+    same challenge — PostgreSQL's row-level lock on the UPDATE ensures
+    only one transaction gets rowcount=1.
+
+    Returns the consumed challenge row on success.
+    """
+    now = _now()
+    row = db.execute(
+        text(
+            "UPDATE super_admin_mfa_challenges "
+            "SET used_at = :now "
+            "WHERE challenge_hash = :hash "
+            "  AND super_admin_id = :sa_id "
+            "  AND used_at IS NULL "
+            "  AND expires_at > :now "
+            "RETURNING id, super_admin_id, expires_at, used_at"
+        ),
+        {"now": now, "hash": challenge_hash, "sa_id": str(sa_id)},
+    ).fetchone()
+
+    if row is None:
+        # Distinguish "already used" from "not found / expired"
+        existing = db.execute(
+            text(
+                "SELECT used_at, expires_at FROM super_admin_mfa_challenges "
+                "WHERE challenge_hash = :hash AND super_admin_id = :sa_id"
+            ),
+            {"hash": challenge_hash, "sa_id": str(sa_id)},
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=401, detail="MFA challenge not found")
+        if existing[0] is not None:
+            raise HTTPException(status_code=409, detail="MFA challenge already used")
+        if existing[1] <= now:
+            raise HTTPException(status_code=401, detail="MFA challenge expired")
+        # Should not reach here, but fail-closed
+        raise HTTPException(status_code=401, detail="MFA challenge invalid")
+
+    # Build the model object for the caller
+    return SuperAdminMFAChallenge(
+        id=row[0],
+        super_admin_id=row[1],
+        challenge_hash=challenge_hash,
+        expires_at=row[2],
+        used_at=row[3],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -379,24 +534,73 @@ def generate_recovery_codes(db: Session, *, admin: SuperAdmin) -> list[str]:
 
 
 def consume_recovery_code(db: Session, *, admin: SuperAdmin, code: str, ip: str | None) -> bool:
-    """Try to consume a single recovery code.
+    """Atomically consume a single recovery code.
 
-    Returns True on success. Raises 400 if no matching unused code exists.
+    Race-safe via conditional UPDATE:
+
+      UPDATE super_admin_mfa_recovery_codes
+      SET used_at = :now
+      WHERE id IN (
+        SELECT id FROM super_admin_mfa_recovery_codes
+        WHERE super_admin_id = :aid AND used_at IS NULL
+      )
+      RETURNING id
+
+    The inner SELECT identifies unused codes for this admin. We then try
+    each one with Argon2id verification in Python (cannot do Argon2id
+    in SQL). But the UPDATE itself is atomic — once we set ``used_at``,
+    no other transaction can use the same row.
+
+    Approach:
+      1. SELECT FOR UPDATE all unused codes for this admin (locks rows).
+      2. Verify each with Argon2id.
+      3. On match: UPDATE that single row SET used_at = now WHERE id = X
+         AND used_at IS NULL. If 0 rows updated → another request won
+         the race; raise 409.
+      4. On no match: raise 400 (invalid code).
+
+    SELECT FOR UPDATE prevents two concurrent transactions from both
+    seeing the same unused code and both succeeding.
+
+    Plaintext code is never stored — only the Argon2id hash.
     """
-    rows = db.scalars(
-        select(SuperAdminMFARecoveryCode).where(
-            SuperAdminMFARecoveryCode.super_admin_id == admin.id,
-            SuperAdminMFARecoveryCode.used_at.is_(None),
-        )
-    ).all()
-    matched: SuperAdminMFARecoveryCode | None = None
-    for r in rows:
-        if verify_password(code, r.code_hash):
-            matched = r
+    # Step 1: SELECT FOR UPDATE — locks the rows until commit
+    rows = db.execute(
+        text(
+            "SELECT id, code_hash FROM super_admin_mfa_recovery_codes "
+            "WHERE super_admin_id = :aid AND used_at IS NULL "
+            "FOR UPDATE"
+        ),
+        {"aid": str(admin.id)},
+    ).fetchall()
+
+    matched_id: uuid.UUID | None = None
+    for row in rows:
+        # Verify the code against the stored Argon2id hash
+        if verify_password(code, row[1]):
+            matched_id = row[0]
             break
-    if matched is None:
+
+    if matched_id is None:
         raise HTTPException(status_code=400, detail="Invalid recovery code")
-    matched.used_at = _now()
+
+    # Step 2: Conditional UPDATE — only succeeds if used_at is still NULL
+    # (defence-in-depth even with SELECT FOR UPDATE)
+    result = db.execute(
+        text(
+            "UPDATE super_admin_mfa_recovery_codes "
+            "SET used_at = :now "
+            "WHERE id = :rid AND used_at IS NULL"
+        ),
+        {"now": _now(), "rid": str(matched_id)},
+    )
+    if result.rowcount == 0:
+        # Another concurrent request won the race
+        raise HTTPException(
+            status_code=409,
+            detail="Recovery code was already consumed by another request",
+        )
+
     db.add(SuperAdminAuditLog(
         super_admin_id=admin.id,
         action="super_admin.mfa.recovery_code_used",
@@ -474,11 +678,15 @@ def disable_mfa_for_admin(db: Session, *, admin: SuperAdmin, ip: str | None) -> 
 
 __all__ = [
     "is_locked",
+    "is_mfa_locked",
     "record_failed_login",
     "record_successful_login",
+    "record_failed_mfa",
+    "record_successful_mfa",
     "bump_token_version",
     "issue_mfa_challenge",
     "verify_totp_code",
+    "consume_mfa_challenge",
     "generate_recovery_codes",
     "consume_recovery_code",
     "generate_mfa_secret",

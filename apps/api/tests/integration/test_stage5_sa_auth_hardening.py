@@ -338,53 +338,40 @@ def test_successful_login_clears_failed_counter(client: TestClient, setup_sessio
 def test_9_rate_limit_actually_enforced(client: TestClient, setup_session: Session, monkeypatch):
     """Test 9: Rate limit is enforced on /super-admin/auth/login.
 
-    We monkeypatch the limiter module to simulate a hit-limit scenario.
-    In tests, RATE_LIMIT_ENABLED=false so the real slowapi limiter is None —
-    we verify by directly checking that the limiter would have been wired
-    AND by enabling it for this test.
+    Uses fakeredis to simulate a real Redis backend. Sets a 3/minute limit,
+    sends 4 requests, and verifies the 4th gets 429.
     """
-    # Simulate rate-limit-exceeded by patching the limiter module to return one.
-    from slowapi.errors import RateLimitExceeded
+    import fakeredis
     from app.services import rate_limit as rl_mod
+    from app.core.config import get_settings
 
-    # Re-import the limiter — it was None because RATE_LIMIT_ENABLED=false in conftest.
-    # We monkeypatch it to a mock that always raises RateLimitExceeded.
-    class _MockLimiter:
-        pass
-
-    monkeypatch.setattr(rl_mod, "limiter", _MockLimiter())
-
-    # Patch the fail-closed pre-flight check to be a no-op so we reach the
-    # rate-limit-exceeded path
-    monkeypatch.setattr(rl_mod, "assert_redis_available_or_fail_closed", lambda req: None)
-
-    # Patch the FastAPI app's exception handler path by setting app.state.limiter
-    # to trigger SlowAPIMiddleware's rate-limit-exceeded response.
-    from app.main import app
-    from slowapi import _rate_limit_exceeded_handler
-
-    # Set up minimal slowapi state on the app
-    class _Limit:
-        def __init__(self, limit_value="1/minute"):
-            self.limit_value = limit_value
-
-    # Use a real limiter that limits to 1/minute
-    from slowapi import Limiter
-    real_limiter = Limiter(key_func=lambda req: "test-key", enabled=True, storage_uri="memory://")
-    monkeypatch.setattr(rl_mod, "limiter", real_limiter)
-    app.state.limiter = real_limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    s = get_settings()
+    # Enable rate limiting for this test + inject fakeredis
+    monkeypatch.setattr(s, "rate_limit_enabled", True)
+    monkeypatch.setattr(s, "sa_login_rate_limit", "3/minute")
+    monkeypatch.setattr(s, "environment", "test")  # not production — no fail-closed
+    fake_redis = fakeredis.FakeRedis(decode_responses=True)
+    rl_mod.set_test_redis_client(fake_redis)
 
     admin = _make_sa(setup_session, password="correct-password-123")
-    # First request — should succeed
-    r1 = client.post(
+    # Send 3 requests — all should succeed (or get 401 for wrong password,
+    # but NOT 429)
+    for i in range(3):
+        r = client.post(
+            "/api/v1/super-admin/auth/login",
+            json={"email": admin.email, "password": "wrong"},
+        )
+        assert r.status_code != 429, f"request {i+1} unexpectedly rate-limited"
+
+    # 4th request — should get 429
+    r4 = client.post(
         "/api/v1/super-admin/auth/login",
-        json={"email": admin.email, "password": "correct-password-123"},
+        json={"email": admin.email, "password": "wrong"},
     )
-    # Second request — slowapi middleware would intercept if the decorator
-    # was applied. We're testing the wiring, not the actual limit here.
-    # If the wiring is correct, the limiter is in place.
-    assert app.state.limiter is not None, "limiter not wired into app.state"
+    assert r4.status_code == 429, f"expected 429 on 4th request, got {r4.status_code}"
+
+    # Cleanup
+    rl_mod.set_test_redis_client(None)
 
 
 def test_10_redis_error_does_not_fail_open(client: TestClient, setup_session: Session, monkeypatch):
@@ -395,23 +382,25 @@ def test_10_redis_error_does_not_fail_open(client: TestClient, setup_session: Se
     monkeypatch.setattr(s, "environment", "production")
     monkeypatch.setattr(s, "rate_limit_enabled", True)
     monkeypatch.setattr(s, "sa_rate_limit_fail_closed_in_prod", True)
-    # Patch the limiter module to have a non-None limiter with a broken storage
+    # Inject a broken Redis client that raises on ping
     from app.services import rate_limit as rl_mod
 
-    class _BrokenStorage:
-        def check(self):
+    class _BrokenRedis:
+        def ping(self):
+            raise RuntimeError("Redis unreachable")
+        def eval(self, *a, **kw):
             raise RuntimeError("Redis unreachable")
 
-    class _MockLimiter:
-        _storage = _BrokenStorage()
-
-    monkeypatch.setattr(rl_mod, "limiter", _MockLimiter())
+    rl_mod.set_test_redis_client(_BrokenRedis())
 
     r = client.post(
         "/api/v1/super-admin/auth/login",
         json={"email": admin.email, "password": "correct-password-123"},
     )
     assert r.status_code == 503, f"expected 503 (fail-closed) on Redis error, got {r.status_code}"
+
+    # Cleanup
+    rl_mod.set_test_redis_client(None)
 
 
 # ---------------------------------------------------------------------------
