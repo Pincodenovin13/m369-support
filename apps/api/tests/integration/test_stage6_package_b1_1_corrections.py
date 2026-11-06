@@ -1,9 +1,15 @@
 """Package B.1.1 — Provisioning + RLS UPDATE + effective privilege audit.
 
-Tests B1.1-01 through B1.1-12 verify:
+Tests B1.1-01 through B1.1-15 verify:
   - B1-F01: provision_sa_auth_role.py script (idempotent, secure, verified)
   - B1-F02: Complete RLS UPDATE test for message_attachments (CRUD cross-tenant)
   - B1-F03: Effective PostgreSQL privilege audit (table, column, PUBLIC, membership)
+
+B.1.1.2 corrections:
+  - B1.1-01: try/finally to restore password on assertion failure
+  - B1.1-04: assert subprocess returncode before querying role attributes
+  - B1.1-06: precise DBAPIError + SQLSTATE 42501 check for RLS WITH CHECK
+  - B1.1-09: expand to all 4 privileges (SELECT/INSERT/UPDATE/DELETE) on all 12 tables
 """
 from __future__ import annotations
 
@@ -15,6 +21,7 @@ from pathlib import Path
 import psycopg
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session as SASession
 
 from app.security import hash_password
@@ -95,42 +102,53 @@ def _make_attachment(setup, agency_id, message_id, filename="test.txt"):
 
 
 def test_B1_1_01_provisioning_changes_password(setup_session):
-    """B1.1-01: Provisioning on an existing role changes its password to the env value."""
+    """B1.1-01: Provisioning on an existing role changes its password to the env value.
+
+    Uses try/finally so the test password is always restored to the original
+    value — even if an assertion or connection fails.
+    """
     api_dir = Path(__file__).resolve().parents[2]
-    # Change password to a new value
-    r = subprocess.run(
-        ["python", "scripts/provision_sa_auth_role.py"],
-        cwd=str(api_dir),
-        capture_output=True,
-        text=True,
-        env={
-            **os.environ,
-            "DATABASE_URL": SETUP_DB_URL,
-            "M369_SA_AUTH_PASSWORD": "new_test_password_456",
-        },
-    )
-    assert r.returncode == 0, f"provisioning failed: {r.stderr}"
-    assert "completed" in r.stdout.lower()
 
-    # Verify the new password works
-    conn = psycopg.connect(
-        "postgresql://m369_sa_auth:new_test_password_456@localhost:5432/m369_support_test"
-    )
-    conn.close()
+    try:
+        # Set temporary test password
+        r = subprocess.run(
+            ["python", "scripts/provision_sa_auth_role.py"],
+            cwd=str(api_dir),
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "DATABASE_URL": SETUP_DB_URL,
+                "M369_SA_AUTH_PASSWORD": "new_test_password_456",
+            },
+        )
+        assert r.returncode == 0, f"provisioning failed: {r.stderr}"
+        assert "completed" in r.stdout.lower()
 
-    # Restore the original password for subsequent tests
-    r2 = subprocess.run(
-        ["python", "scripts/provision_sa_auth_role.py"],
-        cwd=str(api_dir),
-        capture_output=True,
-        text=True,
-        env={
-            **os.environ,
-            "DATABASE_URL": SETUP_DB_URL,
-            "M369_SA_AUTH_PASSWORD": "m369_sa_auth_dev_password",
-        },
-    )
-    assert r2.returncode == 0
+        # Verify the new password works
+        conn = psycopg.connect(
+            "postgresql://m369_sa_auth:new_test_password_456@localhost:5432/m369_support_test"
+        )
+        conn.close()
+
+    finally:
+        # Always restore the original password — even if the test failed.
+        # If restoration fails, the test must FAIL (not silently pass).
+        r_restore = subprocess.run(
+            ["python", "scripts/provision_sa_auth_role.py"],
+            cwd=str(api_dir),
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "DATABASE_URL": SETUP_DB_URL,
+                "M369_SA_AUTH_PASSWORD": "m369_sa_auth_dev_password",
+            },
+        )
+        assert r_restore.returncode == 0, (
+            "CRITICAL: password restoration failed — subsequent tests will break. "
+            f"stderr: {r_restore.stderr}"
+        )
 
 
 def test_B1_1_02_provisioning_idempotent(setup_session):
@@ -186,9 +204,13 @@ def test_B1_1_03_provisioning_enables_real_connection(setup_session):
 
 
 def test_B1_1_04_provisioning_preserves_role_attributes(setup_session):
-    """B1.1-04: After provisioning, role attributes are still correct."""
+    """B1.1-04: After provisioning, role attributes are still correct.
+
+    The subprocess return code is asserted BEFORE querying the role —
+    if provisioning failed, the role attributes are meaningless.
+    """
     api_dir = Path(__file__).resolve().parents[2]
-    subprocess.run(
+    result = subprocess.run(
         ["python", "scripts/provision_sa_auth_role.py"],
         cwd=str(api_dir),
         capture_output=True,
@@ -199,6 +221,11 @@ def test_B1_1_04_provisioning_preserves_role_attributes(setup_session):
             "M369_SA_AUTH_PASSWORD": "m369_sa_auth_dev_password",
         },
     )
+    assert result.returncode == 0, (
+        "Provisioning failed; role attributes were not verified. "
+        f"stderr: {result.stderr}"
+    )
+
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
         with conn.cursor() as cur:
@@ -245,6 +272,10 @@ def test_B1_1_06_attachment_rls_full_crud_cross_tenant(setup_session):
 
     Complete cross-tenant CRUD test using m369_app (RLS-enforced) connection
     with SET LOCAL app.tenant_id = '<agency_b>'.
+
+    The INSERT test verifies that the error is specifically PostgreSQL's
+    insufficient_privilege (SQLSTATE 42501) from RLS WITH CHECK — not an
+    unrelated FK violation or database error.
     """
     agency_a = _make_agency(setup_session, "A")
     agency_b = _make_agency(setup_session, "B")
@@ -264,12 +295,28 @@ def test_B1_1_06_attachment_rls_full_crud_cross_tenant(setup_session):
         assert count[0] == 0, "Tenant B saw Tenant A's attachment — RLS SELECT broken"
 
         # 2. INSERT with agency_id = A — should fail (RLS WITH CHECK)
+        # The error must be PostgreSQL insufficient_privilege (SQLSTATE 42501),
+        # NOT a Foreign Key violation or unrelated database error.
         att_evil = uuid.uuid4()
-        with pytest.raises(Exception):
-            session.execute(text(
-                f"INSERT INTO message_attachments (id, message_id, agency_id, filename, mime_type, size_bytes, storage_key) "
-                f"VALUES ('{att_evil}', '{msg_a}', '{agency_a}', 'evil.txt', 'text/plain', 100, 'evil')"
-            ))
+        insert_sql = text(
+            f"INSERT INTO message_attachments (id, message_id, agency_id, filename, mime_type, size_bytes, storage_key) "
+            f"VALUES ('{att_evil}', '{msg_a}', '{agency_a}', 'evil.txt', 'text/plain', 100, 'evil')"
+        )
+        with pytest.raises(DBAPIError) as exc_info:
+            session.execute(insert_sql)
+        # Verify the error is RLS insufficient_privilege (42501), not an FK error
+        sqlstate = getattr(exc_info.value.orig, "sqlstate", None) or \
+                   getattr(getattr(exc_info.value, "orig", None), "diag", None)
+        # psycopg3: sqlstate is on .orig.diag.sqlstate
+        diag = getattr(getattr(exc_info.value, "orig", None), "diag", None)
+        actual_sqlstate = getattr(diag, "sqlstate", None) if diag else None
+        assert actual_sqlstate == "42501", (
+            f"Expected PostgreSQL insufficient_privilege (42501) "
+            f"from RLS WITH CHECK, got SQLSTATE={actual_sqlstate}. "
+            f"This may be a Foreign Key error or unrelated DB error — "
+            f"RLS protection is not confirmed."
+        )
+        # Rollback the failed transaction so the session is usable again
         session.rollback()
 
     with SASession(app_engine) as session:
@@ -308,7 +355,7 @@ def test_B1_1_06_attachment_rls_full_crud_cross_tenant(setup_session):
 
 
 # ===========================================================================
-# B1-F03: Effective privilege audit (B1.1-07 to B1.1-12)
+# B1-F03: Effective privilege audit (B1.1-07 to B1.1-15)
 # ===========================================================================
 
 
@@ -373,7 +420,11 @@ def test_B1_1_08_app_no_public_access(setup_session):
 
 
 def test_B1_1_09_sa_auth_no_tenant_access(setup_session):
-    """B1.1-09: m369_sa_auth has NO access to tenant tables."""
+    """B1.1-09: m369_sa_auth has NO access to tenant tables.
+
+    Checks all 4 DML privileges (SELECT, INSERT, UPDATE, DELETE) on all 12
+    tenant + platform tables. None should be granted to m369_sa_auth.
+    """
     tenant_tables = [
         "agencies", "users", "workspaces", "contacts", "conversations",
         "messages", "message_attachments", "payments", "subscriptions",
@@ -383,13 +434,14 @@ def test_B1_1_09_sa_auth_no_tenant_access(setup_session):
     try:
         with conn.cursor() as cur:
             for table in tenant_tables:
-                cur.execute(
-                    "SELECT has_table_privilege('m369_sa_auth', %s, 'SELECT')",
-                    (table,),
-                )
-                assert not cur.fetchone()[0], (
-                    f"m369_sa_auth has SELECT on {table} — should not"
-                )
+                for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+                    cur.execute(
+                        "SELECT has_table_privilege('m369_sa_auth', %s, %s)",
+                        (table, privilege),
+                    )
+                    assert not cur.fetchone()[0], (
+                        f"m369_sa_auth unexpectedly has {privilege} on {table}"
+                    )
     finally:
         conn.close()
 
