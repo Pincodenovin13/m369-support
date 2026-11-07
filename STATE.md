@@ -3,7 +3,7 @@
 > **Last updated:** 2026-11-07
 > **Branch:** `phase-1/agency-auth-integration-closure`
 > **Documentation base commit:** `0fb6dc1e5bfa8a831e8ec75172aeeb1e322e20be`
-> **Current HEAD:** Same as documentation base (this is the latest commit).
+> **Current HEAD:** `2e44f6b75293fae675fa8e9e4a88d64f74c32e8d`
 
 ---
 
@@ -35,7 +35,8 @@ The following packages have been implemented and pushed to GitHub on this branch
 | Agency Token Revocation | `890f6a5` | Server-side session revocation for agency users (token_version + tver claim in JWT) |
 | Package B.1.3 | `61efc4c` | Refresh cookie flow + JWT validation hardening + multi-agency login UI + dashboard fixes |
 | Package B.1.3.1 | `bc2d515` | Missing frontend api-client.ts (gitignore fix) + dashboard role lookup + 401/403 separation |
-| Documentation | `0fb6dc1` | STATE.md, PROJECT_STRUCTURE.md, README.md, phase-1.md updates |
+| Documentation | `0fb6dc1` | Initial repository documentation: STATE.md, PROJECT_STRUCTURE.md, README.md, phase-1.md |
+| Documentation Accuracy Patch | `2e44f6b` | Corrected HEAD, Z.ai-reported test labels, complete file tree, production-readiness disclaimers |
 
 ---
 
