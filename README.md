@@ -5,10 +5,10 @@
 
 ## Project Status
 
-**Phase 1 (Foundation + Multi-Tenancy + Security Hardening)** — implementation complete, pending independent production-readiness verification.
+**Phase 1 (Foundation + Multi-Tenancy + Security Hardening)** — implementation complete. Test results are **reported by Z.ai** (the implementation agent) from a local sandbox and have **not** been independently verified. See [`STATE.md`](./STATE.md) for details, blockers, and evidence.
 
-- **Current state:** See [`STATE.md`](./STATE.md) for completed packages, commit references, blockers, and next steps.
-- **Repository structure:** See [`docs/PROJECT_STRUCTURE.md`](./docs/PROJECT_STRUCTURE.md) for the full directory tree and entry points.
+- **Current state:** See [`STATE.md`](./STATE.md) for completed packages, commit references, test status, blockers, and next steps.
+- **Repository structure:** See [`docs/PROJECT_STRUCTURE.md`](./docs/PROJECT_STRUCTURE.md) for the complete tracked file tree and entry points.
 
 ## Repository Layout
 
@@ -68,10 +68,10 @@ npm run dev
 
 | Document | Path | Description |
 |---|---|---|
-| **Project State** | [`STATE.md`](./STATE.md) | Current phase, completed packages, blockers, next steps |
-| **Project Structure** | [`docs/PROJECT_STRUCTURE.md`](./docs/PROJECT_STRUCTURE.md) | Full directory tree, entry points, file purposes |
+| **Project State** | [`STATE.md`](./STATE.md) | Current phase, completed packages, test status, blockers, next steps |
+| **Project Structure** | [`docs/PROJECT_STRUCTURE.md`](./docs/PROJECT_STRUCTURE.md) | Complete tracked file tree, entry points, file purposes |
 | **Architecture Overview** | [`docs/architecture/overview.md`](./docs/architecture/overview.md) | System architecture diagram, layers, design principles |
-| **Phase 1 Scope** | [`docs/architecture/phase-1.md`](./docs/architecture/phase-1.md) | What's implemented, what's deferred |
+| **Phase 1 Scope** | [`docs/architecture/phase-1.md`](./docs/architecture/phase-1.md) | What's implemented, what's deferred, what's blocked |
 | **Security: Tenant Isolation** | [`docs/security/tenant-isolation.md`](./docs/security/tenant-isolation.md) | RLS policies, tenant context, composite FKs |
 | **Security: Authentication** | [`docs/security/authentication.md`](./docs/security/authentication.md) | JWT, Argon2id, token_version, MFA |
 | **Security: Session Revocation** | [`docs/security/agency-session-revocation.md`](./docs/security/agency-session-revocation.md) | How token_version enables server-side logout |
@@ -94,12 +94,14 @@ npm run dev
 
 ## Testing
 
+Test results below are **reported by Z.ai** (the implementation agent) from a local sandbox and have **not** been independently verified. See [`STATE.md`](./STATE.md) for full evidence and blockers.
+
 ```bash
-# Backend (346 tests against real PostgreSQL)
+# Backend (Z.ai reports 346 tests passing against real PostgreSQL 16.2)
 cd apps/api
 python3 -m pytest -q
 
-# Frontend
+# Frontend (Z.ai reports all checks passing)
 cd apps/web
 npm run type-check
 npm run build

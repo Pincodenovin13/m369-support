@@ -5,7 +5,12 @@
 Phase 1 establishes the technical foundation for M369 Support, including full
 multi-tenancy, authentication, RBAC, and comprehensive security hardening.
 
-### Implemented and Tested
+### Implemented and Z.ai-Tested
+
+The following items are implemented and tested by Z.ai (the implementation agent)
+in a local sandbox against real PostgreSQL 16.2. These results have **not** been
+independently verified by a third party. See [`STATE.md`](../../STATE.md) for
+the full test evidence, blockers, and verification status.
 
 - ✅ Monorepo structure (apps/api, apps/web, apps/widget, packages/, infrastructure/, docs/)
 - ✅ Backend: FastAPI 0.115 + SQLAlchemy 2.0 + Alembic + Pydantic 2 + psycopg 3
@@ -18,9 +23,6 @@ multi-tenancy, authentication, RBAC, and comprehensive security hardening.
 - ✅ Tenant context middleware + `SET LOCAL app.tenant_id` (transaction-scoped)
 - ✅ Role-based access control (owner, admin, manager, agent, viewer)
 - ✅ ~80 API endpoints (agency + Super Admin)
-- ✅ 346 tests executed against real PostgreSQL 16.2 — ALL PASS
-- ✅ Docker Compose for local development
-- ✅ CLI script for creating the first Super Admin
 - ✅ Super Admin authentication with TOTP MFA (RFC 6238)
 - ✅ Server-side session revocation via token_version (both agency and Super Admin)
 - ✅ Brute-force protection (atomic counter, lockout, no email enumeration)
@@ -30,6 +32,14 @@ multi-tenancy, authentication, RBAC, and comprehensive security hardening.
 - ✅ m369_super_admin role neutralized (was BYPASSRLS + broad DML; now inert)
 - ✅ Subscription lifecycle (trial → active → past_due → suspended → cancelled)
 - ✅ Payment verification (idempotent, crypto-ready, INTEGER cents)
+
+### Blocked (Not Independently Verified)
+
+- Docker Compose full deployment (Docker unavailable in sandbox)
+- Real Redis integration (fakeredis used for tests)
+- Clean venv install (no isolated venv in sandbox)
+- Reverse proxy deployment (TRUSTED_PROXY_IPS tested via mocks only)
+- Independent third-party test execution (no third party has run the suite)
 
 ### Deferred
 
@@ -45,21 +55,18 @@ multi-tenancy, authentication, RBAC, and comprehensive security hardening.
 - Agency brute-force lockout counter → Phase 2 (rate limiting exists, no per-account lockout)
 - Access token TTL split (agency vs SA) → config decision, not security issue
 
-### Unverified (Blocked)
+### Production Readiness
 
-- Docker Compose full deployment (Docker unavailable in sandbox)
-- Real Redis integration (fakeredis used for tests)
-- Clean venv install (no isolated venv in sandbox)
-- Reverse proxy deployment (TRUSTED_PROXY_IPS tested via mocks only)
+Phase 1 is **not** declared production-ready. Docker, real Redis, clean venv install,
+and independent test verification remain blocked. See [`STATE.md`](../../STATE.md)
+for the current blocker list.
 
-## Test Results
+## Z.ai-Reported Test Results
 
-| Metric | Value |
-|---|---|
-| Total tests | 346 |
-| Passing | 346 |
-| Failing | 0 |
-| All run against | Real PostgreSQL 16.2 |
-| Frontend type-check | ✅ PASS |
-| Frontend build | ✅ PASS |
-| Frontend lint | ✅ PASS |
+| Metric | Value | Verification |
+|---|---|---|
+| Backend tests | 346 passing, 0 failing | Z.ai-reported; not independently verified |
+| Backend environment | PostgreSQL 16.2 (pgserver) | Z.ai sandbox |
+| Frontend type-check | PASS | Z.ai-reported |
+| Frontend build | PASS | Z.ai-reported |
+| Frontend lint | PASS | Z.ai-reported |
