@@ -79,16 +79,22 @@ def _issue_tokens_for(user: User, agency_id: uuid.UUID) -> tuple[str, str]:
 
     Both tokens carry ``agency_id`` — the refresh token is bound to the
     agency selected at login and cannot be used to switch agencies.
+
+    Both tokens also carry ``tver`` (token_version) — the request dependency
+    and refresh endpoint compare this against ``users.token_version`` to
+    enforce server-side session revocation.
     """
     access = create_access_token(
         subject=str(user.id),
         token_type="agency",
         agency_id=str(agency_id),
+        token_version=user.token_version,
     )
     refresh = create_refresh_token(
         subject=str(user.id),
         token_type="agency",
         agency_id=str(agency_id),
+        token_version=user.token_version,
     )
     return access, refresh
 
@@ -246,6 +252,10 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
     never from the request body. This prevents switching agencies via
     refresh.
 
+    The ``tver`` claim in the refresh token is compared against
+    ``users.token_version``. If the user has logged out (bumped
+    token_version), the refresh token is rejected with 401.
+
     The token's agency_id is validated against:
     - User is active
     - User still has an active membership in that agency
@@ -265,6 +275,19 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
 
+    # Verify token_version — rejects revoked refresh tokens
+    token_version = decoded.get("tver")
+    if (
+        isinstance(token_version, bool)
+        or not isinstance(token_version, int)
+        or token_version < 0
+        or token_version != user.token_version
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or revoked refresh token",
+        )
+
     # Revalidate membership using the SECURITY DEFINER function
     rows = db.execute(
         text("SELECT agency_id, is_active, role FROM get_user_memberships_for_login(:uid)"),
@@ -283,11 +306,13 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
         subject=str(user.id),
         token_type="agency",
         agency_id=str(token_agency_id),
+        token_version=user.token_version,
     )
     new_refresh = create_refresh_token(
         subject=str(user.id),
         token_type="agency",
         agency_id=str(token_agency_id),
+        token_version=user.token_version,
     )
     return TokenResponse(
         access_token=access,
@@ -297,17 +322,41 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(response: Response):
-    """Clear the auth cookies.
+def logout(
+    response: Response,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Logout — atomically bump ``token_version`` to revoke all sessions.
 
-    SECURITY LIMITATION: This does NOT revoke the JWT server-side. The token
-    remains valid until its natural expiry. Server-side revocation requires
-    a Redis-backed denylist (planned for Phase 2). Clients must not rely on
-    logout alone for session termination in high-security scenarios.
+    After this call, all previously-issued access AND refresh tokens for
+    this user are invalid (their ``tver`` claim no longer matches
+    ``users.token_version``).
+
+    The bump is done via an atomic SQL UPDATE with RETURNING — no
+    Python read-modify-write. This prevents concurrent logout requests
+    from racing.
+
+    Cookie deletion headers are set on the same Response object that is
+    returned — not on a newly constructed Response (which would lose
+    the Set-Cookie headers).
     """
+    from sqlalchemy import update
+
+    result = db.execute(
+        update(User)
+        .where(User.id == user.id)
+        .values(token_version=User.token_version + 1)
+        .returning(User.token_version)
+    )
+    new_version = result.scalar_one()
+    db.commit()
+
+    # Delete cookies on the SAME response — not a new Response
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/api/v1/auth")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 @router.get("/me", response_model=UserWithMembershipsOut)

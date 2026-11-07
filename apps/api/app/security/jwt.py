@@ -110,14 +110,16 @@ def create_access_token(
 ) -> str:
     """Issue a signed JWT. ``token_type`` controls the signing key and decoder.
 
-    ``token_version`` is required for ``token_type="super_admin"`` — the
-    request dependency compares it against the DB row's
-    ``super_admins.token_version`` to enforce server-side session revocation.
+    ``token_version`` is required for ``token_type="agency"`` AND
+    ``token_type="super_admin"`` — the request dependency compares it
+    against the DB row's ``token_version`` to enforce server-side session
+    revocation. Only ``token_type="mfa_challenge"`` is exempt (it's a
+    short-lived challenge, not a session token).
     """
     s = get_settings()
     now = datetime.now(timezone.utc)
-    if token_type == "super_admin" and token_version is None:
-        raise ValueError("token_version is required for super_admin tokens")
+    if token_type in ("agency", "super_admin") and token_version is None:
+        raise ValueError(f"token_version is required for {token_type} tokens")
     if token_type == "mfa_challenge":
         # Short TTL for MFA challenges — separate from access token TTL
         exp_delta = expires_in or timedelta(minutes=s.super_admin_mfa_challenge_ttl_minutes)
@@ -146,6 +148,7 @@ def create_refresh_token(
     subject: str,
     token_type: TokenType = "agency",
     agency_id: str | None = None,
+    token_version: int | None = None,
 ) -> str:
     """Long-lived refresh token. Shares the signing key with its access sibling.
 
@@ -153,9 +156,11 @@ def create_refresh_token(
     Super Admin refresh tokens are not implemented — calling with
     ``token_type="super_admin"`` raises ``ValueError``.
 
-    For ``token_type="agency"``, ``agency_id`` is **required** — the refresh
-    token is bound to the agency selected at login and cannot be used to
-    switch agencies.
+    For ``token_type="agency"``, ``agency_id`` and ``token_version`` are
+    **required** — the refresh token is bound to the agency selected at
+    login and carries the user's ``token_version`` for revocation checking.
+    The refresh endpoint compares ``tver`` against ``users.token_version``
+    and rejects mismatches with 401.
     """
     if token_type != "agency":
         raise ValueError(
@@ -164,6 +169,8 @@ def create_refresh_token(
         )
     if not agency_id:
         raise ValueError("agency_id is required for agency refresh tokens")
+    if token_version is None:
+        raise ValueError("token_version is required for agency refresh tokens")
 
     s = get_settings()
     now = datetime.now(timezone.utc)
@@ -179,6 +186,7 @@ def create_refresh_token(
         "jti": uuid.uuid4().hex,
         "scope": "agency",
         "agency_id": agency_id,
+        "tver": token_version,
     }
     return jwt.encode(payload, _signing_key("agency"), algorithm=s.jwt_algorithm)
 

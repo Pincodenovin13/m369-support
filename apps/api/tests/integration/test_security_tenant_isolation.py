@@ -281,6 +281,7 @@ def test_wrong_token_type_rejected():
         subject=str(uuid.uuid4()),
         token_type="agency",
         agency_id=str(uuid.uuid4()),
+        token_version=0,
     )
     assert decode_super_admin_token(agency_token) is None, "Agency token leaked through super admin decoder"
 
@@ -322,6 +323,7 @@ def test_authorization_role_check(client: TestClient, setup_session: Session, ag
         subject=str(agent_user.id),
         token_type="agency",
         agency_id=str(agency.id),
+        token_version=0,
     )
 
     r = client.post(

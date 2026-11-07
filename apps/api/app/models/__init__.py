@@ -203,6 +203,15 @@ class User(Base, TimestampMixin):
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Server-side session revocation (migration 0014). Bumped on logout
+    # via atomic UPDATE ... SET token_version = token_version + 1.
+    # The JWT carries this value as the ``tver`` claim; the request
+    # dependency compares token.tver vs users.token_version and rejects
+    # mismatches with 401.
+    token_version: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+
     memberships: Mapped[list["AgencyMembership"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )

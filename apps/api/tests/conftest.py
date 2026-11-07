@@ -331,6 +331,7 @@ def _register_agency(setup_session: Session, name: str, email: str, password: st
         subject=str(user.id),
         token_type="agency",
         agency_id=str(agency.id),
+        token_version=user.token_version,
     )
     return agency, user, token
 

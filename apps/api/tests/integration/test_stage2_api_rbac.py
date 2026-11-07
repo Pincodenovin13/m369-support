@@ -67,7 +67,7 @@ def _make_user_with_role(setup: Session, agency: Agency, email: str, role: str) 
     setup.add_all([u, m])
     setup.commit()
     setup.refresh(u)
-    tok = create_access_token(subject=str(u.id), token_type="agency", agency_id=str(agency.id))
+    tok = create_access_token(subject=str(u.id), token_type="agency", agency_id=str(agency.id), token_version=0)
     return u, tok
 
 

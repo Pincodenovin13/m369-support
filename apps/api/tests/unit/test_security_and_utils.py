@@ -33,7 +33,7 @@ def test_password_hash_unique_per_call():
 def test_agency_token_round_trip():
     user_id = str(uuid.uuid4())
     agency_id = str(uuid.uuid4())
-    token = create_access_token(subject=user_id, token_type="agency", agency_id=agency_id)
+    token = create_access_token(subject=user_id, token_type="agency", agency_id=agency_id, token_version=0)
     decoded = decode_access_token(token)
     assert decoded is not None
     assert decoded["sub"] == user_id
@@ -79,16 +79,17 @@ def test_slugify_unicode():
 
 
 def test_create_agency_refresh_token_with_valid_agency_id():
-    """create_refresh_token with agency_id succeeds and produces a decodable token."""
+    """create_refresh_token with agency_id + token_version succeeds."""
     user_id = str(uuid.uuid4())
     agency_id = str(uuid.uuid4())
-    token = create_refresh_token(subject=user_id, token_type="agency", agency_id=agency_id)
+    token = create_refresh_token(subject=user_id, token_type="agency", agency_id=agency_id, token_version=0)
     decoded = decode_refresh_token(token, expected_scope="agency")
     assert decoded is not None
     assert decoded["sub"] == user_id
     assert decoded["scope"] == "agency"
     assert decoded["agency_id"] == agency_id
     assert decoded["type"] == "refresh"
+    assert decoded["tver"] == 0
 
 
 def test_create_refresh_token_rejects_super_admin():
@@ -101,3 +102,9 @@ def test_create_refresh_token_rejects_missing_agency_id():
     """create_refresh_token with agency token_type but no agency_id must raise ValueError."""
     with pytest.raises(ValueError, match="agency_id is required"):
         create_refresh_token(subject=str(uuid.uuid4()), token_type="agency", agency_id=None)
+
+
+def test_create_refresh_token_rejects_missing_token_version():
+    """create_refresh_token with agency token_type but no token_version must raise ValueError."""
+    with pytest.raises(ValueError, match="token_version is required"):
+        create_refresh_token(subject=str(uuid.uuid4()), token_type="agency", agency_id=str(uuid.uuid4()))

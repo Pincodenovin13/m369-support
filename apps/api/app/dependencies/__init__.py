@@ -70,7 +70,12 @@ def get_current_user(
     ctx: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(get_db),
 ) -> User:
-    """Resolve and return the authenticated User. Rejects Super Admin tokens."""
+    """Resolve and return the authenticated User. Rejects Super Admin tokens.
+
+    Also verifies ``token_version`` — if the user has logged out (bumped
+    token_version), the access token's ``tver`` claim no longer matches
+    and the request is rejected with 401.
+    """
     if ctx.is_super_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -78,9 +83,32 @@ def get_current_user(
         )
     if ctx.user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    # Decode the raw token to extract tver claim
+    payload = decode_access_token(ctx.raw_token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+
     user = db.get(User, ctx.user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+
+    # Verify token_version — rejects revoked access tokens
+    token_version = payload.get("tver")
+    if (
+        isinstance(token_version, bool)
+        or not isinstance(token_version, int)
+        or token_version < 0
+        or token_version != user.token_version
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session revoked",
+        )
+
     # Set tenant context on the DB session so RLS policies filter automatically.
     # We also stash it in session.info so the after_begin event listener can
     # re-issue SET LOCAL after every commit/rollback (RLS GUC persistence).

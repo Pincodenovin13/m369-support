@@ -553,8 +553,9 @@ def test_MIG_01_upgrade_downgrade_reupgrade():
                         capture_output=True, text=True, env=env)
     assert r0.returncode == 0, f"upgrade failed: {r0.stderr}"
 
-    # Downgrade -1 (0013 → 0012)
-    r1 = subprocess.run(["alembic", "downgrade", "-1"], cwd=str(api_dir),
+    # Downgrade to 0012 (0014 → 0013 → 0012)
+    # This crosses migration 0013's downgrade, which drops the guard function.
+    r1 = subprocess.run(["alembic", "downgrade", "0012_package_b1_critical_corrections"], cwd=str(api_dir),
                         capture_output=True, text=True, env=env)
     assert r1.returncode == 0, f"downgrade failed: {r1.stderr}"
 
@@ -608,7 +609,7 @@ def test_MIG_02_existing_data_preserved(setup_session):
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0013_package_b1_2_final_security", f"head is {v}"
+            assert v == "0014_agency_user_token_version", f"head is {v}"
     finally:
         conn.close()
 
