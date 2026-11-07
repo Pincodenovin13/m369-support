@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.core.config import get_settings
-from app.models import Agency, AgencyMembership, User
+from app.models import Agency, AgencyMembership, Contact, User, Workspace
 from app.security import (
     create_access_token,
     create_refresh_token,
@@ -369,14 +369,11 @@ def test_ATK_11_logout_cookie_deletion_headers(client, setup_session, monkeypatc
 # ---------------------------------------------------------------------------
 
 
-def test_ATK_12_concurrent_logout_atomic(client, setup_session, monkeypatch):
-    """ATK-12: Two concurrent logout requests — token_version increments exactly once.
+def test_ATK_12_repeated_logout_rejects_old_token(client, setup_session, monkeypatch):
+    """ATK-12: Repeated logout — first succeeds (204), second rejected (401).
 
-    Since both requests use the same TestClient (sequential), we verify
-    that the first logout succeeds (204) and the second also succeeds
-    (204) — but token_version increments by exactly 2 (once per request).
-    The key assertion: after both logouts, the OLD token is rejected (tver=0
-    vs token_version=2).
+    After the first logout bumps token_version, the old token's tver no
+    longer matches. The second logout attempt is rejected with 401.
     """
     s = get_settings()
     monkeypatch.setattr(s, "rate_limit_enabled", False)
@@ -397,16 +394,78 @@ def test_ATK_12_concurrent_logout_atomic(client, setup_session, monkeypatch):
     r1 = client.post("/api/v1/auth/logout", headers=_h(token))
     assert r1.status_code == 204
 
-    # Second logout — also succeeds (token_version was bumped to 1,
-    # but the token's tver is still 0, so get_current_user rejects it with 401).
-    # This means the second logout fails because the token is already revoked.
+    # Second logout — rejected because token_version was bumped
     r2 = client.post("/api/v1/auth/logout", headers=_h(token))
-    assert r2.status_code == 401  # Token already revoked after first logout
+    assert r2.status_code == 401
 
     # Verify token_version was incremented exactly once
     setup_session.expire_all()
     user2 = setup_session.get(User, user.id)
     assert user2.token_version == 1, f"Expected token_version=1, got {user2.token_version}"
+
+
+def test_ATK_12b_concurrent_atomic_token_version_increment(
+    db_engine,
+    setup_session,
+):
+    """ATK-12b: Two independent PostgreSQL transactions must not lose increments.
+
+    Uses ThreadPoolExecutor + Barrier + two independent engine connections.
+    Tests that the SQL UPDATE ... SET token_version = token_version + 1
+    is atomic under true parallelism (not sequential TestClient calls).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from sqlalchemy import update
+
+    agency = Agency(
+        name="ATK12B Agency",
+        slug=f"atk12b-{uuid.uuid4().hex[:8]}",
+    )
+    user = User(
+        email=f"atk12b-{uuid.uuid4().hex[:8]}@test.com",
+        name="ATK12B",
+        password_hash=hash_password("test-password-123"),
+    )
+    membership = AgencyMembership(
+        user=user,
+        agency=agency,
+        role="owner",
+    )
+
+    setup_session.add_all([agency, user, membership])
+    setup_session.commit()
+    setup_session.refresh(user)
+
+    user_id = user.id
+    barrier = Barrier(2)
+
+    def atomic_increment():
+        with db_engine.begin() as conn:
+            barrier.wait(timeout=10)
+
+            result = conn.execute(
+                update(User)
+                .where(User.id == user_id)
+                .values(token_version=User.token_version + 1)
+                .returning(User.token_version)
+            )
+
+            return result.scalar_one()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(atomic_increment),
+            executor.submit(atomic_increment),
+        ]
+        results = [future.result(timeout=20) for future in futures]
+
+    setup_session.expire_all()
+    updated_user = setup_session.get(User, user_id)
+
+    assert updated_user is not None
+    assert updated_user.token_version == 2
+    assert sorted(results) == [1, 2]
 
 
 # ---------------------------------------------------------------------------
@@ -545,17 +604,105 @@ def test_ATK_15_super_admin_unaffected(client, setup_session, monkeypatch):
 
 
 def test_ATK_16_tenant_isolation_intact(client, setup_session, agency_a, agency_b, monkeypatch):
-    """ATK-16: Tenant isolation + RLS still works with versioned tokens."""
+    """ATK-16: Tenant isolation + RLS still works with versioned tokens.
+
+    Creates a contact in Agency B's workspace, then verifies:
+    - Agency B can read its own contact (200)
+    - Agency A cannot read Agency B's contact (404)
+    - No Agency B data leaks in Agency A's response
+    """
     s = get_settings()
     monkeypatch.setattr(s, "rate_limit_enabled", False)
 
     a, _, tok_a = agency_a
-    # Verify agency A can see its own contacts
-    r = client.get("/api/v1/contacts", headers=_h(tok_a))
-    assert r.status_code == 200
+    b, _, tok_b = agency_b
 
-    # Agency A cannot see Agency B's data
-    b, _, _ = agency_b
-    # The token from agency_a has agency A's context — RLS should filter
-    # to only agency A's data (verified by all previous stage tests).
-    # This test confirms the token_version check doesn't break RLS.
+    # Create a workspace for Agency B
+    workspace_b = Workspace(
+        agency_id=b.id,
+        name="ATK16 Workspace B",
+        slug=f"atk16-b-{uuid.uuid4().hex[:8]}",
+    )
+    setup_session.add(workspace_b)
+    setup_session.commit()
+    setup_session.refresh(workspace_b)
+
+    # Create a contact in Agency B's workspace
+    contact_b = Contact(
+        agency_id=b.id,
+        workspace_id=workspace_b.id,
+        name="Private Agency B Contact",
+        email="private-b@agency-b.com",
+    )
+    setup_session.add(contact_b)
+    setup_session.commit()
+    setup_session.refresh(contact_b)
+
+    # Agency B can read its own contact
+    response_b = client.get(
+        f"/api/v1/contacts/{contact_b.id}",
+        headers=_h(tok_b),
+    )
+    assert response_b.status_code == 200, f"Agency B should access own contact: {response_b.status_code}"
+
+    # Agency A cannot read Agency B's contact (RLS → 404)
+    response_a = client.get(
+        f"/api/v1/contacts/{contact_b.id}",
+        headers=_h(tok_a),
+    )
+    assert response_a.status_code == 404, f"Agency A should NOT access Agency B's contact: {response_a.status_code}"
+
+    # Verify Agency A's contact list doesn't include Agency B's contact
+    response_a_list = client.get("/api/v1/contacts", headers=_h(tok_a))
+    assert response_a_list.status_code == 200
+    contact_ids = [c["id"] for c in response_a_list.json()["items"]]
+    assert str(contact_b.id) not in contact_ids, "Agency B's contact leaked into Agency A's list"
+
+
+# ---------------------------------------------------------------------------
+# ATK-17: Cookie-only refresh
+# ---------------------------------------------------------------------------
+
+
+def test_ATK_17_cookie_only_refresh(client, setup_session, monkeypatch):
+    """ATK-17: Cookie-based refresh returns 204 + rotates both cookies.
+
+    Steps:
+    1. Login (sets cookies).
+    2. POST /auth/refresh with NO JSON body (cookie-only).
+    3. Response must be 204.
+    4. Response must contain Set-Cookie for both access + refresh.
+    5. New access cookie must work for /auth/me.
+    """
+    s = get_settings()
+    monkeypatch.setattr(s, "rate_limit_enabled", False)
+
+    agency = Agency(name="ATK17 Agency", slug=f"atk17-{uuid.uuid4().hex[:6]}")
+    user = User(email="atk17@test.com", name="ATK17", password_hash=hash_password("test-password-123"))
+    membership = AgencyMembership(user=user, agency=agency, role="owner")
+    setup_session.add_all([agency, user, membership])
+    setup_session.commit()
+    setup_session.refresh(user)
+
+    # Login — sets cookies
+    r_login = client.post("/api/v1/auth/login", json={
+        "email": "atk17@test.com",
+        "password": "test-password-123",
+        "agency_id": str(agency.id),
+    })
+    assert r_login.status_code == 200
+
+    # Cookie-only refresh — no JSON body
+    r_refresh = client.post("/api/v1/auth/refresh")
+    assert r_refresh.status_code == 204, f"Expected 204, got {r_refresh.status_code}: {r_refresh.text}"
+
+    # Verify Set-Cookie headers for both cookies
+    set_cookie_headers = r_refresh.headers.get_list("set-cookie")
+    cookie_names = [h.split("=")[0].strip().lower() for h in set_cookie_headers]
+    assert "access_token" in cookie_names, f"access_token cookie missing: {set_cookie_headers}"
+    assert "refresh_token" in cookie_names, f"refresh_token cookie missing: {set_cookie_headers}"
+
+    # New access cookie must work for /auth/me
+    r_me = client.get("/api/v1/auth/me")
+    assert r_me.status_code == 200, f"New access cookie failed: {r_me.status_code}"
+    assert r_me.json()["email"] == "atk17@test.com"

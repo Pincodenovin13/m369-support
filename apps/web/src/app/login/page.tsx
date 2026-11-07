@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authApi, ApiError } from "@/lib/api-client";
+import { authApi, ApiError, type AgencyLoginOption } from "@/lib/api-client";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -11,24 +11,37 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agencyOptions, setAgencyOptions] = useState<AgencyLoginOption[]>([]);
+  const [selectedAgency, setSelectedAgency] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
     try {
-      await authApi.login(email, password);
+      await authApi.login(email, password, selectedAgency ?? undefined);
       router.push("/dashboard");
       router.refresh();
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.status === 401) {
+        if (err.status === 400 && err.detail && typeof err.detail === "object" && "available_agencies" in err.detail) {
+          // Multi-agency: server requires agency selection
+          const detail = err.detail as { message?: string; available_agencies?: AgencyLoginOption[] };
+          setAgencyOptions(detail.available_agencies ?? []);
+          if (!selectedAgency) {
+            setError(detail.message ?? "Please select an agency to continue.");
+          } else {
+            setError("The selected agency is not valid. Please choose again.");
+            setSelectedAgency(null);
+          }
+        } else if (err.status === 401) {
           setError("Incorrect email or password");
         } else {
           setError(err.message);
         }
       } else {
-        setError("An unexpected error occurred");
+        setError("An unexpected error occurred. Please check your connection.");
       }
     } finally {
       setLoading(false);
@@ -60,7 +73,11 @@ export default function LoginPage() {
               autoComplete="email"
               autoFocus
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setAgencyOptions([]);
+                setSelectedAgency(null);
+              }}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               placeholder="you@example.com"
             />
@@ -81,6 +98,30 @@ export default function LoginPage() {
               placeholder="••••••••"
             />
           </div>
+
+          {agencyOptions.length > 0 && (
+            <div>
+              <label htmlFor="agency" className="block text-sm font-medium text-gray-700">
+                Select Agency
+              </label>
+              <select
+                id="agency"
+                value={selectedAgency ?? ""}
+                onChange={(e) => setSelectedAgency(e.target.value || null)}
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              >
+                <option value="">— Choose an agency —</option>
+                {agencyOptions.map((opt) => (
+                  <option key={opt.agency_id} value={opt.agency_id}>
+                    {opt.agency_id} ({opt.role})
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                You belong to multiple agencies. Select which one to sign in to.
+              </p>
+            </div>
+          )}
 
           {error && (
             <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">

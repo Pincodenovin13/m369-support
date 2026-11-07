@@ -49,12 +49,27 @@ def get_tenant_context(request: Request) -> TenantContext:
         is_super_admin = True
 
     try:
-        user_id = uuid.UUID(payload["sub"]) if not is_super_admin else None
-    except (KeyError, ValueError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed token") from None
+        if is_super_admin:
+            user_id = None
+            agency_id = None
+        else:
+            raw_user_id = payload.get("sub")
+            raw_agency_id = payload.get("agency_id")
 
-    agency_id_str = payload.get("agency_id")
-    agency_id = uuid.UUID(agency_id_str) if agency_id_str else None
+            if not isinstance(raw_user_id, str):
+                raise ValueError("Invalid subject")
+
+            if not isinstance(raw_agency_id, str):
+                raise ValueError("Missing or invalid agency_id")
+
+            user_id = uuid.UUID(raw_user_id)
+            agency_id = uuid.UUID(raw_agency_id)
+
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Malformed token",
+        ) from None
 
     ctx = TenantContext(
         agency_id=agency_id,
@@ -217,10 +232,15 @@ def get_super_admin_context(
     # Extract tver claim — fail-closed if absent (legacy tokens without tver
     # are rejected; only tokens issued after this hardening are valid).
     tver_claim = payload.get("tver")
-    if tver_claim is None:
+
+    if (
+        isinstance(tver_claim, bool)
+        or not isinstance(tver_claim, int)
+        or tver_claim < 0
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token missing token_version claim",
+            detail="Invalid token version",
         )
 
     # Per-request account state check. FAIL-CLOSED on any DB error.
@@ -239,7 +259,7 @@ def get_super_admin_context(
     if not admin.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account is deactivated")
     # Server-side session revocation: tver claim must match DB row.
-    if admin.token_version != int(tver_claim):
+    if admin.token_version != tver_claim:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has been revoked",
@@ -253,5 +273,5 @@ def get_super_admin_context(
     )
     request.state.tenant = ctx
     request.state.super_admin_id = sa_id
-    request.state.super_admin_token_version = int(tver_claim)
+    request.state.super_admin_token_version = tver_claim
     return ctx

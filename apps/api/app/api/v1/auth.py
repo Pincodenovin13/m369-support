@@ -244,38 +244,58 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
     return user
 
 
-@router.post("/refresh", response_model=TokenResponse)
-def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
-    """Exchange a refresh token for a new access token.
+@router.post("/refresh", response_model=None)
+def refresh(
+    request: Request,
+    response: Response,
+    payload: RefreshRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    """Refresh an agency session.
 
-    The ``agency_id`` is read **only** from the signed refresh token —
-    never from the request body. This prevents switching agencies via
-    refresh.
+    Supports:
+    1. Legacy/API clients sending refresh_token in JSON.
+    2. Browser clients using the HttpOnly refresh_token cookie.
 
-    The ``tver`` claim in the refresh token is compared against
-    ``users.token_version``. If the user has logged out (bumped
-    token_version), the refresh token is rejected with 401.
-
-    The token's agency_id is validated against:
-    - User is active
-    - User still has an active membership in that agency
-    - The agency is still active
+    Cookie-based refresh returns 204 and rotates both cookies.
+    JSON-based refresh retains the existing TokenResponse contract.
     """
-    decoded = decode_refresh_token(payload.refresh_token, expected_scope="agency")
+    supplied_token = (
+        payload.refresh_token.strip()
+        if payload is not None and payload.refresh_token
+        else ""
+    )
+    refresh_token = supplied_token or request.cookies.get("refresh_token")
+
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token required",
+        )
+
+    decoded = decode_refresh_token(refresh_token, expected_scope="agency")
     if decoded is None:
-        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
 
     try:
         user_id = uuid.UUID(decoded["sub"])
         token_agency_id = uuid.UUID(decoded["agency_id"])
-    except (KeyError, ValueError):
-        raise HTTPException(status_code=401, detail="Malformed refresh token") from None
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Malformed refresh token",
+        ) from None
 
     user = db.get(User, user_id)
-    if not user or not user.is_active:
-        raise HTTPException(status_code=401, detail="User not found or inactive")
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+        )
 
-    # Verify token_version — rejects revoked refresh tokens
     token_version = decoded.get("tver")
     if (
         isinstance(token_version, bool)
@@ -288,17 +308,23 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
             detail="Invalid or revoked refresh token",
         )
 
-    # Revalidate membership using the SECURITY DEFINER function
     rows = db.execute(
-        text("SELECT agency_id, is_active, role FROM get_user_memberships_for_login(:uid)"),
+        text(
+            "SELECT agency_id, is_active, role "
+            "FROM get_user_memberships_for_login(:uid)"
+        ),
         {"uid": str(user.id)},
     ).all()
 
-    # Find the membership matching the token's agency_id
-    matching = [r for r in rows if r.agency_id == token_agency_id and r.is_active]
+    matching = [
+        row
+        for row in rows
+        if row.agency_id == token_agency_id and row.is_active
+    ]
+
     if not matching:
         raise HTTPException(
-            status_code=403,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="Membership for this agency is no longer active or has been removed",
         )
 
@@ -314,6 +340,15 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
         agency_id=str(token_agency_id),
         token_version=user.token_version,
     )
+
+    _set_auth_cookies(response, access, new_refresh)
+
+    # Browser flow: cookies are HttpOnly; do not expose tokens in JS response.
+    if not supplied_token:
+        response.status_code = status.HTTP_204_NO_CONTENT
+        return response
+
+    # Backward-compatible JSON flow for API/mobile clients.
     return TokenResponse(
         access_token=access,
         refresh_token=new_refresh,

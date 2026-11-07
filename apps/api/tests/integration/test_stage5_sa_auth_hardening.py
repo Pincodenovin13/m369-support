@@ -159,7 +159,7 @@ def test_5_legacy_token_without_tver_rejected(client: TestClient, setup_session:
     legacy_token = pyjwt.encode(payload, s.jwt_super_admin_secret_key, algorithm=s.jwt_algorithm)
     r = client.get("/api/v1/super-admin/auth/me", headers=_h(legacy_token))
     assert r.status_code == 401
-    assert "token_version" in r.json()["detail"].lower()
+    assert "token" in r.json()["detail"].lower() and "version" in r.json()["detail"].lower()
 
 
 def test_6_db_error_fail_closed(client: TestClient, setup_session: Session, monkeypatch):

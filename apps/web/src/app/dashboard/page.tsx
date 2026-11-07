@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { authApi, agencyApi, workspaceApi } from "@/lib/api-client";
+import { authApi, agencyApi, workspaceApi, ApiError } from "@/lib/api-client";
 import type { UserWithMembershipsOut, AgencyOut, WorkspaceOut } from "@/lib/api-client";
 import { DashboardShell } from "@/components/dashboard-shell";
 
@@ -13,23 +13,49 @@ export default function DashboardPage() {
   const [workspaces, setWorkspaces] = useState<WorkspaceOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       try {
         const me = await authApi.me();
+        if (cancelled) return;
         setUser(me);
+
         const ag = await agencyApi.current();
+        if (cancelled) return;
         setAgency(ag);
+
         const ws = await workspaceApi.list();
+        if (cancelled) return;
         setWorkspaces(ws);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load dashboard");
+        if (cancelled) return;
+
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+          // Auth error — redirect to login
+          setAuthError(true);
+          router.replace("/login");
+        } else {
+          // Network or server error — show error, don't redirect
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load dashboard. Please check your connection."
+          );
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
+
     load();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (loading) {
@@ -40,19 +66,29 @@ export default function DashboardPage() {
     );
   }
 
+  if (authError) {
+    return null; // redirecting to login
+  }
+
   if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="rounded-lg bg-red-50 border border-red-200 p-6 text-red-700">
-          {error}
+        <div className="max-w-md rounded-lg bg-red-50 border border-red-200 p-6 text-center">
+          <p className="text-red-700 font-medium mb-2">Something went wrong</p>
+          <p className="text-sm text-red-600">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );
   }
 
   if (!user || !agency) {
-    router.push("/login");
-    return null;
+    return null; // should not reach here — authError would have been set
   }
 
   return (
