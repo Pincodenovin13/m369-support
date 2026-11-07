@@ -64,6 +64,7 @@ export default function RegisterPage() {
               type="text"
               required
               minLength={2}
+              maxLength={180}
               autoFocus
               value={form.agency_name}
               onChange={(e) => setForm({ ...form, agency_name: e.target.value })}
@@ -81,6 +82,7 @@ export default function RegisterPage() {
               type="text"
               required
               minLength={1}
+              maxLength={160}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -113,6 +115,7 @@ export default function RegisterPage() {
               type="password"
               required
               minLength={10}
+              maxLength={128}
               autoComplete="new-password"
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}

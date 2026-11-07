@@ -39,6 +39,7 @@ export interface WorkspaceOut {
 export interface AgencyLoginOption {
   agency_id: string;
   role: string;
+  agency_name?: string;
 }
 
 export interface RegisterInput {

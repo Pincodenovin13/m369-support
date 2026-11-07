@@ -113,7 +113,7 @@ def test_B_01_migration_0011_upgrade_success():
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0014_agency_user_token_version", f"head is {v}, expected 0012"
+            assert v == "0016_extend_login_helper_with_agency_name", f"head is {v}, expected 0012"
     finally:
         conn.close()
 

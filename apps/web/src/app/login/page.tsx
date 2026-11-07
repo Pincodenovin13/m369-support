@@ -25,6 +25,11 @@ export default function LoginPage() {
       router.refresh();
     } catch (err) {
       if (err instanceof ApiError) {
+        // Clear stale agency options on non-400 errors
+        if (err.status !== 400) {
+          setAgencyOptions([]);
+          setSelectedAgency(null);
+        }
         if (err.status === 400 && err.detail && typeof err.detail === "object" && "available_agencies" in err.detail) {
           // Multi-agency: server requires agency selection
           const detail = err.detail as { message?: string; available_agencies?: AgencyLoginOption[] };
@@ -113,7 +118,7 @@ export default function LoginPage() {
                 <option value="">— Choose an agency —</option>
                 {agencyOptions.map((opt) => (
                   <option key={opt.agency_id} value={opt.agency_id}>
-                    {opt.agency_id} ({opt.role})
+                    {opt.agency_name ?? opt.agency_id} ({opt.role})
                   </option>
                 ))}
               </select>

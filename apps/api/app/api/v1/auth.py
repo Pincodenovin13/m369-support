@@ -113,7 +113,7 @@ def _resolve_membership(
     Returns: (agency_id, role)
     """
     rows = db.execute(
-        text("SELECT agency_id, is_active, role FROM get_user_memberships_for_login(:uid)"),
+        text("SELECT agency_id, is_active, role, agency_name FROM get_user_memberships_for_login(:uid)"),
         {"uid": str(user.id)},
     ).all()
 
@@ -121,12 +121,12 @@ def _resolve_membership(
         raise HTTPException(status_code=403, detail="User has no agency membership")
 
     # Filter to active agencies
-    active = [(r.agency_id, r.role) for r in rows if r.is_active]
+    active = [(r.agency_id, r.role, r.agency_name) for r in rows if r.is_active]
     if len(active) == 0:
         raise HTTPException(status_code=403, detail="Agency is not active")
 
     if len(active) == 1:
-        agency_id, role = active[0]
+        agency_id, role, _ = active[0]
         if requested_agency_id is not None and agency_id != requested_agency_id:
             raise HTTPException(status_code=403, detail="User is not a member of the requested agency")
         return agency_id, role
@@ -134,8 +134,8 @@ def _resolve_membership(
     # Multiple active memberships — require explicit selection
     if requested_agency_id is None:
         available = [
-            {"agency_id": str(aid), "role": role}
-            for aid, role in active
+            {"agency_id": str(aid), "role": role, "agency_name": name}
+            for aid, role, name in active
         ]
         raise HTTPException(
             status_code=400,
@@ -146,7 +146,7 @@ def _resolve_membership(
         )
 
     # Find the requested agency in active memberships
-    for aid, role in active:
+    for aid, role, _ in active:
         if aid == requested_agency_id:
             return aid, role
 
@@ -328,17 +328,30 @@ def refresh(
             detail="Membership for this agency is no longer active or has been removed",
         )
 
+    # Atomically bump token_version to invalidate the old refresh token.
+    # This implements refresh-token rotation: the old refresh token's tver
+    # no longer matches, so it cannot be replayed even if stolen.
+    from sqlalchemy import update as sa_update
+    result = db.execute(
+        sa_update(User)
+        .where(User.id == user.id)
+        .values(token_version=User.token_version + 1)
+        .returning(User.token_version)
+    )
+    new_version = result.scalar_one()
+    db.commit()
+
     access = create_access_token(
         subject=str(user.id),
         token_type="agency",
         agency_id=str(token_agency_id),
-        token_version=user.token_version,
+        token_version=new_version,
     )
     new_refresh = create_refresh_token(
         subject=str(user.id),
         token_type="agency",
         agency_id=str(token_agency_id),
-        token_version=user.token_version,
+        token_version=new_version,
     )
 
     _set_auth_cookies(response, access, new_refresh)

@@ -531,7 +531,11 @@ def test_ATK_13b_login_produces_versioned_token(client, setup_session, monkeypat
 
 
 def test_ATK_14_refresh_produces_versioned_tokens(client, setup_session, monkeypatch):
-    """ATK-14: Refresh produces new tokens with the current token_version."""
+    """ATK-14: Refresh produces new tokens with the bumped token_version.
+
+    Refresh now atomically bumps token_version (refresh-token rotation),
+    invalidating the old refresh token. The new tokens carry the NEW version.
+    """
     s = get_settings()
     monkeypatch.setattr(s, "rate_limit_enabled", False)
 
@@ -542,26 +546,32 @@ def test_ATK_14_refresh_produces_versioned_tokens(client, setup_session, monkeyp
     setup_session.commit()
     setup_session.refresh(user)
 
+    old_version = user.token_version  # should be 0
+
     refresh = create_refresh_token(
         subject=str(user.id), token_type="agency",
-        agency_id=str(agency.id), token_version=user.token_version,
+        agency_id=str(agency.id), token_version=old_version,
     )
     r = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
     assert r.status_code == 200
 
-    # Verify new access token has tver
+    # Verify new access token has tver = old_version + 1 (refresh rotation bump)
     new_access = r.json()["access_token"]
     decoded = decode_access_token(new_access)
     assert decoded is not None
     assert "tver" in decoded
-    assert decoded["tver"] == user.token_version
+    assert decoded["tver"] == old_version + 1
 
-    # Verify new refresh token has tver
+    # Verify new refresh token has tver = old_version + 1
     new_refresh = r.json()["refresh_token"]
     decoded_r = decode_refresh_token(new_refresh)
     assert decoded_r is not None
     assert "tver" in decoded_r
-    assert decoded_r["tver"] == user.token_version
+    assert decoded_r["tver"] == old_version + 1
+
+    # Verify old refresh token is now rejected (token_version was bumped)
+    r2 = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
+    assert r2.status_code == 401, "Old refresh token should be rejected after rotation"
 
 
 # ---------------------------------------------------------------------------

@@ -836,7 +836,7 @@ def test_migration_0010_upgrade_then_downgrade_roundtrip():
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()
-            assert v is not None and v[0] == "0014_agency_user_token_version", (
+            assert v is not None and v[0] == "0016_extend_login_helper_with_agency_name", (
                 f"alembic_version after re-upgrade: {v}"
             )
     finally:

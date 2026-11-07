@@ -757,7 +757,7 @@ def test_migration_chain_complete(db_engine):
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0014_agency_user_token_version", f"migration chain incomplete: head is {v}, expected 0014_agency_user_token_version"
+            assert v == "0016_extend_login_helper_with_agency_name", f"migration chain incomplete: head is {v}, expected 0016_extend_login_helper_with_agency_name"
     finally:
         conn.close()
 

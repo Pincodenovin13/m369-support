@@ -63,33 +63,25 @@ def test_REG_01_registration_succeeds_when_no_agency(client, setup_session, monk
     assert r.json()["email"] == "owner@test.com"
 
 
-def test_REG_02_registration_creates_exactly_one_of_each(setup_session, monkeypatch):
-    """REG-02: Registration creates exactly one agency, one owner user, one membership."""
+def test_REG_02_registration_creates_exactly_one_of_each(client, setup_session, monkeypatch):
+    """REG-02: Registration creates exactly one agency, one owner user, one membership.
+
+    Uses the actual HTTP endpoint via the normal test client (m369_app role)
+    — NOT a setup_session override. This proves registration works under
+    real RLS restrictions.
+    """
     s = get_settings()
     monkeypatch.setattr(s, "rate_limit_enabled", False)
 
-    # Use a fresh setup — the fixture truncates between tests
-    from fastapi.testclient import TestClient
-    from app.main import app
-    from app.db.database import get_db
+    r = client.post("/api/v1/auth/register", json={
+        "agency_name": "Exact Count Agency",
+        "name": "Owner",
+        "email": "exact@test.com",
+        "password": "test-password-123",
+    })
+    assert r.status_code == 201
 
-    # Override get_db to use setup_session (postgres)
-    def _override():
-        yield setup_session
-    app.dependency_overrides[get_db] = _override
-
-    with TestClient(app) as c:
-        r = c.post("/api/v1/auth/register", json={
-            "agency_name": "Exact Count Agency",
-            "name": "Owner",
-            "email": "exact@test.com",
-            "password": "test-password-123",
-        })
-        assert r.status_code == 201
-
-    app.dependency_overrides.clear()
-
-    # Verify exactly 1 agency, 1 user, 1 membership
+    # Verify exactly 1 agency, 1 user, 1 membership using setup (postgres) for verification
     agency_count = setup_session.execute(text("SELECT COUNT(*) FROM agencies")).scalar()
     user_count = setup_session.execute(text("SELECT COUNT(*) FROM users")).scalar()
     membership_count = setup_session.execute(text("SELECT COUNT(*) FROM agency_memberships")).scalar()
@@ -609,7 +601,7 @@ def test_MIG_02_existing_data_preserved(setup_session):
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0014_agency_user_token_version", f"head is {v}"
+            assert v == "0016_extend_login_helper_with_agency_name", f"head is {v}"
     finally:
         conn.close()
 

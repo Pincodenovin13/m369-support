@@ -29,6 +29,7 @@ export function DashboardShell({ user, agency, children }: DashboardShellProps) 
       if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
         // Already logged out or session expired — redirect to login
         router.replace("/login");
+        router.refresh();
       } else {
         // Network or server error — show error, re-enable button
         setLogoutError(
@@ -36,8 +37,9 @@ export function DashboardShell({ user, agency, children }: DashboardShellProps) 
             ? err.message
             : "Failed to sign out. Please check your connection."
         );
-        setLogoutLoading(false);
       }
+    } finally {
+      setLogoutLoading(false);
     }
   }
 
