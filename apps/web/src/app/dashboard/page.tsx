@@ -34,10 +34,13 @@ export default function DashboardPage() {
       } catch (err) {
         if (cancelled) return;
 
-        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        if (err instanceof ApiError && err.status === 401) {
           // Auth error — redirect to login
           setAuthError(true);
           router.replace("/login");
+        } else if (err instanceof ApiError && err.status === 403) {
+          // Authenticated but not authorized — show error, don't redirect
+          setError("You do not have permission to access this dashboard.");
         } else {
           // Network or server error — show error, don't redirect
           setError(
@@ -109,7 +112,9 @@ export default function DashboardPage() {
           <div className="rounded-lg border border-gray-200 bg-white p-5">
             <div className="text-sm font-medium text-gray-500">Your role</div>
             <div className="mt-2 text-lg font-bold text-gray-900 capitalize">
-              {user.memberships[0]?.role || "—"}
+              {user.memberships.find(
+                (membership) => membership.agency_id === agency.id
+              )?.role || "—"}
             </div>
           </div>
           <div className="rounded-lg border border-gray-200 bg-white p-5">
