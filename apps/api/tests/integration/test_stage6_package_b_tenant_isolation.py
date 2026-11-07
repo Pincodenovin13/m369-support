@@ -113,7 +113,7 @@ def test_B_01_migration_0011_upgrade_success():
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0012_package_b1_critical_corrections", f"head is {v}, expected 0012"
+            assert v == "0013_package_b1_2_final_security", f"head is {v}, expected 0012"
     finally:
         conn.close()
 

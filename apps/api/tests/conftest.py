@@ -127,6 +127,16 @@ def db_engine():
         conn.exec_driver_sql("GRANT USAGE ON SCHEMA public TO m369_sa_auth")
         conn.exec_driver_sql("REVOKE CREATE ON SCHEMA public FROM m369_sa_auth")
 
+        # Ensure m369_registration_guard exists (created by migration 0013,
+        # but provisioned here for test consistency)
+        conn.exec_driver_sql(
+            "DO $$ BEGIN CREATE ROLE m369_registration_guard "
+            "NOLOGIN NOSUPERUSER BYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION NOINHERIT; "
+            "EXCEPTION WHEN duplicate_object THEN "
+            "ALTER ROLE m369_registration_guard "
+            "NOLOGIN NOSUPERUSER BYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION NOINHERIT; END $$"
+        )
+
     # Run Alembic migration as postgres (superuser — owns tables)
     api_dir = Path(__file__).resolve().parents[1]
     result = subprocess.run(

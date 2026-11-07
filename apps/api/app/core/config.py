@@ -145,6 +145,12 @@ class Settings(BaseSettings):
     # Number of recovery codes generated at MFA-enable time.
     sa_mfa_recovery_code_count: int = Field(default=8, ge=4, le=16)
 
+    # --- Agency authentication rate limiting (Package B.1.2) ---
+    # Separate from Super Admin rate limits — different key namespaces.
+    agency_login_ip_rate_limit: str = Field(default="30/minute")
+    agency_login_account_rate_limit: str = Field(default="5/minute")
+    agency_register_ip_rate_limit: str = Field(default="3/hour")
+
     model_config = SettingsConfigDict(
         env_file=(REPO_ROOT / ".env", APP_DIR / ".env"),
         env_file_encoding="utf-8",
@@ -173,6 +179,8 @@ class Settings(BaseSettings):
             violations.append("DATABASE_URL_SUPER_ADMIN_AUTH contains a dev-only password")
         if not self.cookie_secure:
             violations.append("COOKIE_SECURE is false")
+        if self.environment == "production" and not self.rate_limit_enabled:
+            violations.append("RATE_LIMIT_ENABLED is false in production")
         if violations:
             print(
                 "FATAL: production environment detected but dev defaults are still set:\n"

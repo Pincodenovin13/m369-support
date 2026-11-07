@@ -175,6 +175,7 @@ def test_production_guard_passes_with_real_secrets():
         "DATABASE_URL_SUPER_ADMIN": real_sa_db_url,
         "DATABASE_URL_SUPER_ADMIN_AUTH": real_sa_auth_db_url,
         "COOKIE_SECURE": "true",
+        "RATE_LIMIT_ENABLED": "true",
     }, clear=False):
         from app.core.config import Settings
         settings = Settings()

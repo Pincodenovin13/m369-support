@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -42,7 +42,12 @@ from ...security import (
     hash_password,
     verify_password,
 )
+from ...services.rate_limit import (
+    assert_redis_available_or_fail_closed,
+    check_login_rate_limit as check_sa_login_rate_limit,
+)
 from ...slugs import unique_slug
+from ...tenancy.context import set_tenant_context
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -143,24 +148,51 @@ def _resolve_membership(
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, response: Response, db: Session = Depends(get_db)):
+def register(payload: RegisterRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     """Register the first agency + its owner.
 
     Open only if no agency exists. After the first agency, registration is
-    closed — a Super Admin (Phase 9+) is required to create additional agencies.
+    closed — a Super Admin is required to create additional agencies.
+
+    Security flow:
+      1. Rate-limit check (per-IP registration throttle).
+      2. Acquire PostgreSQL advisory lock (prevents concurrent registration).
+      3. Call is_initial_agency_registration_open() (SECURITY DEFINER, bypasses
+         RLS to check global agency count).
+      4. If open: generate agency UUID, set tenant context (SET LOCAL
+         app.tenant_id), then INSERT agency + user + membership.
+      5. If closed: return 403.
     """
-    existing_agency = db.scalar(select(Agency).limit(1))
-    if existing_agency is not None:
+    # 1. Rate-limit: per-IP registration throttle.
+    _check_agency_register_rate_limit(request)
+
+    # 2. Advisory lock — prevents concurrent registration across connections.
+    #    The lock is transaction-scoped (released on commit/rollback).
+    db.execute(text("SELECT pg_advisory_xact_lock(3690369036901)"))
+
+    # 3. Global registration check via SECURITY DEFINER function.
+    #    This function bypasses RLS (owned by m369_registration_guard with
+    #    BYPASSRLS) so it sees ALL agencies, not just those visible to
+    #    the current tenant context.
+    is_open = db.scalar(text("SELECT public.is_initial_agency_registration_open()"))
+    if not is_open:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Self-registration is closed. Ask a Super Admin to create a new agency.",
         )
 
     email = payload.email.lower()
+    # Check for existing user with same email (users table has no RLS)
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status_code=409, detail="A user with that email already exists")
 
+    # 4. Generate agency UUID explicitly, then set tenant context BEFORE INSERT.
+    #    RLS requires app.tenant_id to match the row being inserted.
+    agency_id = uuid.uuid4()
+    set_tenant_context(db, agency_id)
+
     agency = Agency(
+        id=agency_id,
         name=payload.agency_name.strip(),
         slug=unique_slug(db, Agency, "slug", payload.agency_name.strip()),
     )
@@ -180,12 +212,15 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
 
 
 @router.post("/login", response_model=UserOut)
-def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)):
+def login(payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     """Login with email + password. Issues access + refresh tokens.
 
     If the user belongs to multiple agencies, ``agency_id`` must be specified.
     If omitted, returns 400 with a list of available agencies.
     """
+    # Rate-limit: per-IP + per-account (independent from Super Admin limits).
+    _check_agency_login_rate_limit(request, payload.email)
+
     user = db.scalar(select(User).where(User.email == payload.email.lower()))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
@@ -279,3 +314,125 @@ def logout(response: Response):
 def me(user: User = Depends(get_current_user)):
     """Return the current user with all their agency memberships."""
     return user
+
+
+# ---------------------------------------------------------------------------
+# Agency rate-limit helpers (separate namespaces from Super Admin)
+# ---------------------------------------------------------------------------
+
+
+def _check_agency_login_rate_limit(request: Request, email: str) -> None:
+    """Per-IP + per-account rate limit for agency /auth/login.
+
+    Uses separate Redis key namespaces from Super Admin:
+      agency_login:ip:<sha256(ip)[:16]>
+      agency_login:acct:<sha256(email_lower)[:16]>
+    """
+    from ...services.rate_limit import (
+        get_client_ip,
+        get_redis_client,
+        _check_limit,
+        _ip_key,
+        _account_key,
+    )
+
+    s = get_settings()
+    if not s.rate_limit_enabled:
+        return
+
+    client = get_redis_client()
+    if client is None:
+        if s.environment == "production" and s.sa_rate_limit_fail_closed_in_prod:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Rate limiter unavailable",
+            )
+        return
+
+    ip = get_client_ip(request)
+    ip_k = f"agency_login:{_ip_key(ip)}"
+    acct_k = f"agency_login:{_account_key(email)}"
+
+    ip_limit, ip_window = _parse_limit(s.agency_login_ip_rate_limit)
+    acct_limit, acct_window = _parse_limit(s.agency_login_account_rate_limit)
+
+    try:
+        ip_ok, _ = _check_limit(client, ip_k, ip_limit, ip_window)
+        acct_ok, _ = _check_limit(client, acct_k, acct_limit, acct_window)
+    except Exception:
+        if s.environment == "production" and s.sa_rate_limit_fail_closed_in_prod:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Rate limiter backend unreachable",
+            ) from None
+        return
+
+    if not ip_ok:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many login attempts from this IP. Retry after {ip_window}s.",
+            headers={"Retry-After": str(ip_window)},
+        )
+    if not acct_ok:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many login attempts for this account. Retry after {acct_window}s.",
+            headers={"Retry-After": str(acct_window)},
+        )
+
+
+def _check_agency_register_rate_limit(request: Request) -> None:
+    """Per-IP rate limit for agency /auth/register."""
+    from ...services.rate_limit import (
+        get_client_ip,
+        get_redis_client,
+        _check_limit,
+        _ip_key,
+    )
+
+    s = get_settings()
+    if not s.rate_limit_enabled:
+        return
+
+    client = get_redis_client()
+    if client is None:
+        if s.environment == "production" and s.sa_rate_limit_fail_closed_in_prod:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Rate limiter unavailable",
+            )
+        return
+
+    ip = get_client_ip(request)
+    ip_k = f"agency_register:{_ip_key(ip)}"
+
+    limit_n, window_s = _parse_limit(s.agency_register_ip_rate_limit)
+
+    try:
+        ip_ok, _ = _check_limit(client, ip_k, limit_n, window_s)
+    except Exception:
+        if s.environment == "production" and s.sa_rate_limit_fail_closed_in_prod:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Rate limiter backend unreachable",
+            ) from None
+        return
+
+    if not ip_ok:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many registration attempts. Retry after {window_s}s.",
+            headers={"Retry-After": str(window_s)},
+        )
+
+
+def _parse_limit(limit_str: str) -> tuple[int, int]:
+    """Parse 'N/minute' → (N, 60)."""
+    try:
+        parts = limit_str.split("/")
+        n = int(parts[0])
+        unit = parts[1] if len(parts) > 1 else "minute"
+        seconds = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}.get(unit, 60)
+        return n, seconds
+    except (ValueError, IndexError):
+        return 30, 60
