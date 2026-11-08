@@ -1,19 +1,20 @@
 # M369 Support — Project State
 
-> **Last updated:** 2026-11-08 (UTC+8)
+> **Last updated:** 2026-11-08 (UTC+8) — third update after repository structure unification + frontend buildout
 > **Canonical development branch:** `phase-1/foundation`
-> **Current working branch:** `refactor/repository-structure-unification`
+> **Current working branch:** `refactor/repository-structure-unification` (HEAD: `9a6e98f3b92d776ad03e594fdd1fc316d41b1eb8`)
 > **Recovery branch:** `recovery/zai-workspace-2026-11-08` (HEAD: `1c3294154b41e051855613416f0bc68c3901d125`)
-> **Migration head (filesystem):** `0016_extend_login_helper_with_agency_name`
+> **Tracked files:** 175 (was 168 at start of this task)
+> **Migration head (filesystem):** `0016_extend_login_helper_with_agency_name` (unchanged — 16 migrations, linear chain)
 > **Migration head (database-applied):** UNVERIFIED — no reachable DB in audit sandbox
 
 ---
 
 ## Project Phase
 
-**Phase 1 (Foundation + Multi-Tenancy + Security Hardening)** — implementation complete on `phase-1/security-closure-b1-4` (commit `ab046a2`). The 16 hardening commits are NOT yet merged into `phase-1/foundation` on GitHub (foundation is still at Stage 4, commit `0b3139a`). A `recovery/zai-workspace-2026-11-08` branch was created to preserve the Rule 13 documentation work + historical artifacts.
+**Phase 1 (Foundation + Multi-Tenancy + Security Hardening)** — backend implementation complete on `phase-1/security-closure-b1-4` (commit `ab046a2`). The 16 hardening commits are NOT yet merged into `phase-1/foundation` on GitHub (foundation is still at Stage 4, commit `0b3139a`). A `recovery/zai-workspace-2026-11-08` branch preserves the Rule 13 documentation + historical artifacts. The current `refactor/repository-structure-unification` branch adds repository structure unification + frontend feature buildout.
 
-All test results below are **reported by Z.ai** (the implementation agent) from a local sandbox against a real PostgreSQL 16.2 instance. They have **not** been independently verified by a third party. The 2026-11-08 audit independently verified the frontend type-check only; backend tests could not be re-executed because the audit sandbox lacks the required Python dependencies.
+All test results below are **reported by Z.ai** (the implementation agent) from a local sandbox against a real PostgreSQL 16.2 instance. They have **not** been independently verified by a third party. The 2026-11-08 audit independently verified the frontend type-check only; backend tests could not be re-executed because the audit sandbox lacks the required Python dependencies (sqlalchemy, psycopg2, pgserver).
 
 ---
 
@@ -75,10 +76,12 @@ All test results below are **reported by Z.ai** (the implementation agent) from 
 | Backend test files | 18 (3 unit + 15 integration) | INDEPENDENTLY VERIFIED (file count via `git ls-tree`) |
 | Backend test functions (static count) | 346 | INDEPENDENTLY VERIFIED (count via `grep -rE 'def test_' \| wc -l`) |
 | Backend test execution | 346 passing, 0 failing | Z.ai-REPORTED ONLY — NOT independently verified (sandbox lacks sqlalchemy, psycopg2, pgserver) |
-| Frontend type-check (`tsc --noEmit`) | PASS (exit 0) | ✅ INDEPENDENTLY VERIFIED (2026-11-08) |
+| Frontend type-check (`tsc --noEmit`) | PASS (exit 0) | ✅ INDEPENDENTLY VERIFIED (2026-11-08, after frontend buildout) |
 | Frontend build (`next build`) | PASS | Z.ai-REPORTED ONLY |
 | Frontend lint (`next lint`) | PASS | Z.ai-REPORTED ONLY |
 | Frontend test suite | 0 files | NOT IMPLEMENTED (Phase 1 has no frontend tests) |
+| Frontend feature pages | 10 routes (login, register, dashboard, contacts, conversations, conversations/[id], teams, channels, canned-responses, kb) | ✅ IMPLEMENTED (2026-11-08, commit `9a6e98f`) |
+| CI workflow file (`.github/workflows/ci.yml`) | NOT PUSHED | BLOCKED — PAT lacks `workflow` scope; file delivered in `/home/z/my-project/download/ci-workflow/` for Product Owner to push |
 | Docker Compose deployment | BLOCKED | Docker unavailable in sandbox |
 | Real Redis integration | BLOCKED | fakeredis used for rate-limit tests |
 | Clean venv install | BLOCKED | No isolated venv in sandbox |
