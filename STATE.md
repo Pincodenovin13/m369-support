@@ -1,21 +1,23 @@
 # M369 Support — Project State
 
-> **Last updated:** 2026-11-07
-> **Branch:** `phase-1/agency-auth-integration-closure`
-> **Documentation base commit:** `0fb6dc1e5bfa8a831e8ec75172aeeb1e322e20be`
-> **Current HEAD:** `2e44f6b75293fae675fa8e9e4a88d64f74c32e8d`
+> **Last updated:** 2026-11-08 (UTC+8)
+> **Canonical development branch:** `phase-1/foundation`
+> **Current working branch:** `refactor/repository-structure-unification`
+> **Recovery branch:** `recovery/zai-workspace-2026-11-08` (HEAD: `1c3294154b41e051855613416f0bc68c3901d125`)
+> **Migration head (filesystem):** `0016_extend_login_helper_with_agency_name`
+> **Migration head (database-applied):** UNVERIFIED — no reachable DB in audit sandbox
 
 ---
 
 ## Project Phase
 
-**Phase 1 (Foundation + Multi-Tenancy + Security Hardening)** — implementation complete. Test results below are **reported by Z.ai** (the implementation agent) against a local PostgreSQL 16.2 sandbox. They have **not** been independently verified by a third party. Independent verification and production deployment are pending.
+**Phase 1 (Foundation + Multi-Tenancy + Security Hardening)** — implementation complete on `phase-1/security-closure-b1-4` (commit `ab046a2`). The 16 hardening commits are NOT yet merged into `phase-1/foundation` on GitHub (foundation is still at Stage 4, commit `0b3139a`). A `recovery/zai-workspace-2026-11-08` branch was created to preserve the Rule 13 documentation work + historical artifacts.
+
+All test results below are **reported by Z.ai** (the implementation agent) from a local sandbox against a real PostgreSQL 16.2 instance. They have **not** been independently verified by a third party. The 2026-11-08 audit independently verified the frontend type-check only; backend tests could not be re-executed because the audit sandbox lacks the required Python dependencies.
 
 ---
 
 ## Completed Packages
-
-The following packages have been implemented and pushed to GitHub on this branch. Each commit is independently reviewable.
 
 | Package | Commit SHA | Key Deliverable |
 |---|---|---|
@@ -35,42 +37,53 @@ The following packages have been implemented and pushed to GitHub on this branch
 | Agency Token Revocation | `890f6a5` | Server-side session revocation for agency users (token_version + tver claim in JWT) |
 | Package B.1.3 | `61efc4c` | Refresh cookie flow + JWT validation hardening + multi-agency login UI + dashboard fixes |
 | Package B.1.3.1 | `bc2d515` | Missing frontend api-client.ts (gitignore fix) + dashboard role lookup + 401/403 separation |
-| Documentation | `0fb6dc1` | Initial repository documentation: STATE.md, PROJECT_STRUCTURE.md, README.md, phase-1.md |
-| Documentation Accuracy Patch | `2e44f6b` | Corrected HEAD, Z.ai-reported test labels, complete file tree, production-readiness disclaimers |
+| Package B.1.4 | `ab046a2` | Role cleanup + refresh-token rotation (atomic tver bump on every refresh) + frontend auth + migration 0016 |
+| Rule 13 | `79b4311` (on recovery branch) | CONTRIBUTING.md with Rules 1-13 (Rule 13 = Artifact Disclosure & Delivery mandate) |
 
 ---
 
 ## Migration Chain
 
 ```
-0001_initial → 0002_remove_admin_login → 0003_login_helper →
-0004_fix_login_helper_acl → 0005_restrict_login_helper_owner →
-0006_phase1_extended → 0007_fix_login_reader_acl →
-0008_create_sa_runner_role → 0009_widen_paid_currency →
-0010_sa_auth_hardening → 0011_tenant_isolation_hardening →
-0012_package_b1_critical_corrections → 0013_package_b1_2_final_security →
-0014_agency_user_token_version
+0001_initial
+  → 0002_remove_admin_login
+  → 0003_login_helper_function
+  → 0004_fix_login_helper_acl
+  → 0005_restrict_login_helper_owner
+  → 0006_phase1_extended
+  → 0007_fix_login_reader_acl
+  → 0008_create_sa_runner_role
+  → 0009_widen_paid_currency
+  → 0010_sa_auth_hardening
+  → 0011_tenant_isolation_hardening
+  → 0012_package_b1_critical_corrections
+  → 0013_package_b1_2_final_security
+  → 0014_agency_user_token_version
+  → 0015_revoke_super_admin_memberships_both_directions
+  → 0016_extend_login_helper_with_agency_name    ← HEAD
 ```
 
-**Head:** `0014_agency_user_token_version`
+**Filesystem head:** `0016_extend_login_helper_with_agency_name` (16 migrations, linear chain, verified)
+**Database-applied head:** UNVERIFIED — `alembic` not run in audit sandbox; no reachable DB
 
 ---
 
-## Test Status
-
-The following results are **reported by Z.ai** (the implementation agent) from a local sandbox environment. They have **not** been independently verified by a third party. All backend tests run against a real PostgreSQL 16.2 instance via `pgserver`; rate-limit tests use `fakeredis` (not a real Redis server).
+## Test Status (strict verification labels)
 
 | Metric | Value | Verification |
 |---|---|---|
-| Backend tests — reported | 346 passing, 0 failing | Z.ai-reported; not independently verified |
-| Backend environment | PostgreSQL 16.2 (pgserver) | Z.ai sandbox |
-| Frontend type-check — reported | PASS (`tsc --noEmit`) | Z.ai-reported |
-| Frontend build — reported | PASS (`next build`) | Z.ai-reported |
-| Frontend lint — reported | PASS (`next lint`) | Z.ai-reported |
-| Docker Compose deployment | ❌ BLOCKED | Docker unavailable in sandbox |
-| Real Redis integration | ❌ BLOCKED | fakeredis used for rate-limit tests |
-| Clean venv install | ❌ BLOCKED | No isolated venv in sandbox |
-| Reverse proxy deployment | ❌ BLOCKED | TRUSTED_PROXY_IPS tested via mocks only |
+| Backend test files | 18 (3 unit + 15 integration) | INDEPENDENTLY VERIFIED (file count via `git ls-tree`) |
+| Backend test functions (static count) | 346 | INDEPENDENTLY VERIFIED (count via `grep -rE 'def test_' \| wc -l`) |
+| Backend test execution | 346 passing, 0 failing | Z.ai-REPORTED ONLY — NOT independently verified (sandbox lacks sqlalchemy, psycopg2, pgserver) |
+| Frontend type-check (`tsc --noEmit`) | PASS (exit 0) | ✅ INDEPENDENTLY VERIFIED (2026-11-08) |
+| Frontend build (`next build`) | PASS | Z.ai-REPORTED ONLY |
+| Frontend lint (`next lint`) | PASS | Z.ai-REPORTED ONLY |
+| Frontend test suite | 0 files | NOT IMPLEMENTED (Phase 1 has no frontend tests) |
+| Docker Compose deployment | BLOCKED | Docker unavailable in sandbox |
+| Real Redis integration | BLOCKED | fakeredis used for rate-limit tests |
+| Clean venv install | BLOCKED | No isolated venv in sandbox |
+| Reverse proxy deployment | BLOCKED | TRUSTED_PROXY_IPS tested via mocks only |
+| Independent third-party test verification | BLOCKED | No third party has executed the suite |
 
 ---
 
@@ -87,27 +100,26 @@ The following results are **reported by Z.ai** (the implementation agent) from a
 
 ---
 
-## Current Blockers (Production Readiness)
+## Outstanding Risks (Production Readiness)
 
-| # | Blocker | Status | Reason |
+| # | Risk | Priority | Status |
 |---|---|---|---|
-| B1 | Docker Compose not verified | BLOCKED | Docker unavailable in sandbox |
-| B2 | Real Redis not verified | BLOCKED | fakeredis used for rate-limit tests |
-| B3 | Clean venv install not verified | BLOCKED | No isolated venv in sandbox |
-| B4 | Reverse proxy not deployed | BLOCKED | TRUSTED_PROXY_IPS logic tested via mocks only |
-| B5 | Independent test verification | BLOCKED | No third-party has independently executed the test suite |
-
----
-
-## Next Planned Work
-
-1. **Independent verification** — a third party should clone the repository, install dependencies, and execute the full test suite against a real PostgreSQL instance.
-2. **Docker integration test** — deploy `docker compose up` with real secrets, verify migration + provisioning + API startup.
-3. **Real Redis test** — verify Lua INCR+EXPIRE + fail-closed behavior against a real Redis server.
-4. **Clean venv install** — `pip install -r requirements-dev.txt` in a fresh venv.
-5. **Package C** — pending independent verification of Phase 1 security.
-6. **Access token TTL review** — currently 7 days (shared agency + SA); safe due to token_version revocation, but consider splitting.
-7. **Agency brute-force lockout** — rate limiting exists but no per-account lockout counter (unlike Super Admin).
+| P0-1 | B.1.4 (16 hardening commits) NOT merged into `phase-1/foundation` on GitHub | Critical | foundation on GitHub still at Stage 4 (`0b3139a`) |
+| P0-2 | No independent verification of 346 backend tests | Critical | Z.ai-reported only |
+| P0-3 | No security headers (HSTS, X-Content-Type-Options, CSP, etc.) | Critical | `apps/api/app/main.py` registers only CORS + TenantContext middlewares |
+| P0-4 | No request body size limits | Critical | No `max_request_size` enforcement |
+| P1-1 | Agency `User` accounts have no DB-side lockout (only Redis rate limit) | Important | Asymmetric with Super Admin |
+| P1-2 | No email verification flow | Important | Zero `email_verif*` references |
+| P1-3 | Password policy is length-only (10/12 chars) | Important | No complexity rules |
+| P1-4 | No structured logging | Important | Zero `import logging`/`structlog` |
+| P1-5 | Real Redis integration never exercised | Important | fakeredis in tests |
+| P1-6 | Real PostgreSQL + RLS never exercised by independent party | Important | psql not in sandbox |
+| P1-7 | Reverse-proxy trusted-IP boundary not deployed | Important | No Caddy/Nginx configured |
+| P2-1 | No embeddable widget | Operational | `apps/widget/src/.gitkeep` placeholder |
+| P2-2 | No Knowledge Base Markdown rendering | Operational | `kb.py` sets `content_html=""` |
+| P2-3 | No frontend test suite | Operational | Zero `.test.*` files |
+| P2-4 | Docker Compose deployment never verified | Operational | Docker not in sandbox |
+| P2-5 | GitHub default branch is `test/marker`, not `phase-1/foundation` | Operational | Requires owner approval to change |
 
 ---
 
@@ -115,8 +127,8 @@ The following results are **reported by Z.ai** (the implementation agent) from a
 
 | Status | Meaning |
 |---|---|
-| ✅ Implemented + Z.ai-tested | Code exists; Z.ai executed tests in sandbox and reports passing |
-| 🔶 Implemented | Code exists but Z.ai has not executed tests or tests are blocked |
-| ⏳ Planned | Not yet implemented |
+| ✅ INDEPENDENTLY VERIFIED | Verified by execution in this session (with command + exit code) |
+| 🔶 IMPLEMENTER-REPORTED | Reported by Z.ai but not independently verified |
+| ⏳ PLANNED | Not yet implemented |
 | ❌ BLOCKED | Cannot verify due to environment limitations |
-| 🔍 Independently verified | A third party has confirmed by executing tests independently (none yet) |
+| 🚫 NOT IMPLEMENTED | Feature does not exist |

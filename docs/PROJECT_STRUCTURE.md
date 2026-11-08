@@ -1,10 +1,17 @@
-# Project Structure
+# Project Structure (LEGACY — superseded by REPOSITORY_MAP.md)
 
-> **Generated from:** `git ls-files` at commit `2e44f6b75293fae675fa8e9e4a88d64f74c32e8d`
-> **Tracked files:** 132 (verified via `git ls-files | wc -l`)
-> **Branch:** `phase-1/agency-auth-integration-closure`
+> ⚠️ **SUPERSEDED.** This file is preserved as a historical snapshot. The
+> canonical file/folder map is now [`/REPOSITORY_MAP.md`](../../REPOSITORY_MAP.md)
+> at the repository root. New content should not be added to this file —
+> update `REPOSITORY_MAP.md` instead.
+>
+> Snapshot metadata (will be updated on final commit):
+> - **Tracked files at snapshot:** 159 (verified via `git ls-tree -r --name-only HEAD \| wc -l`)
+> - **Branch at snapshot:** `refactor/repository-structure-unification`
+> - **HEAD at snapshot:** (see final commit SHA)
 
-Every file below is a Git-tracked file. No files are invented or omitted.
+The tree below is preserved for historical reference. Every file listed was
+a Git-tracked file at the snapshot commit.
 
 ---
 
