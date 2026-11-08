@@ -1,0 +1,530 @@
+diff --git a/apps/api/app/main.py b/apps/api/app/main.py
+index 3c29653..2ddf89b 100644
+--- a/apps/api/app/main.py
++++ b/apps/api/app/main.py
+@@ -24,14 +24,15 @@ from .routers import (
+     portal,
+     providers,
+     reports,
++    social,
++    social_webhook,
++    tenancy,
++    template_webhooks,
++    webchat,
+     whatsapp,
+     whatsapp_cloud,
+-    template_webhooks,
+     whatsapp_cloud_webhook,
+     widget,
+-    webchat,
+-    social,
+-    social_webhook,
+ )
+ 
+ 
+@@ -139,3 +140,7 @@ app.include_router(social.router, prefix="/api")
+ app.include_router(social_webhook.public_router, prefix="/api")
+ app.include_router(phone.router, prefix="/api")
+ app.include_router(phone.public_router, prefix="/api")
++# Multi-tenancy foundation demo router. Exercises ``get_current_agency_id``
++# and ``assert_tenant_owned`` through a real request path so the test suite
++# can prove cross-tenant isolation without touching any existing endpoint.
++app.include_router(tenancy.router, prefix="/api")
+diff --git a/apps/api/app/routers/tenancy.py b/apps/api/app/routers/tenancy.py
+new file mode 100644
+index 0000000..7c363d3
+--- /dev/null
++++ b/apps/api/app/routers/tenancy.py
+@@ -0,0 +1,61 @@
++"""Demo endpoint proving the multi-tenancy foundation works.
++
++This router exists so the foundation introduced in ``app/tenant.py`` is
++exercised end-to-end through an HTTP request, not just by unit tests. It is
++intentionally tiny: the goal is to wire ``get_current_agency_id`` and
++``assert_tenant_owned`` into a real request path and show that a user from
++agency A is denied agency B's row.
++
++It reads a client by id through the foundation primitives only — no inline
++``Client.agency_id == user.agency_id`` clause — so the test suite can prove
++the helper itself enforces isolation, not that any one router happens to.
++
++The router is mounted under ``/api/tenancy`` so it sits apart from the
++existing surface area and is easy to remove when the foundation is folded
++into the regular routers.
++"""
++
++from __future__ import annotations
++
++import uuid
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy.orm import Session
++
++from ..database import get_db
++from ..models import Client
++from ..schemas import ClientOut
++from ..tenant import assert_tenant_owned, get_current_agency_id
++
++
++router = APIRouter(prefix="/tenancy", tags=["Multi-tenancy"])
++
++
++@router.get("/clients/{client_id}", response_model=ClientOut)
++def get_client_through_foundation(
++    client_id: uuid.UUID,
++    db: Session = Depends(get_db),
++    agency_id: uuid.UUID = Depends(get_current_agency_id),
++):
++    """Resolve a client through the tenant foundation primitives.
++
++    Flow:
++
++    1. ``get_current_agency_id`` resolves the agency from the cookie, not
++       from any request body or path parameter a client can influence.
++    2. The client row is fetched by id alone — a deliberate demonstration
++       that the ownership check is what blocks cross-tenant reads, not the
++       ``where`` clause of the ``select``. (In a real router the ``select``
++       would still filter by agency_id as defense-in-depth; this endpoint
++       does not, so the test can prove the helper is the load-bearing
++       layer.)
++    3. ``assert_tenant_owned`` rejects rows whose ``agency_id`` does not
++       match the resolved one, raising 404 — the same convention every
++       existing ``_client`` / ``_conversation`` helper uses.
++    """
++
++    client = db.get(Client, client_id)
++    if client is None:
++        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
++    assert_tenant_owned(client, agency_id)
++    return client
+diff --git a/apps/api/app/security.py b/apps/api/app/security.py
+index 9158abb..bccf7ec 100644
+--- a/apps/api/app/security.py
++++ b/apps/api/app/security.py
+@@ -24,11 +24,24 @@ def create_access_token(user_id: str) -> str:
+ 
+ 
+ def decode_access_token(token: str) -> str | None:
++    # A portal token and an agency token are both signed with ``secret_key``
++    # (intentionally: one cookie per browser, one decoder per layer). They
++    # differ by the ``type`` claim — ``"portal"`` for portal sessions, absent
++    # for agency sessions. Decoding a portal token here would surface its
++    # ``sub`` (a ``client_id``) as a ``user_id``, and although ``db.get(User,
++    # client_uuid)`` happens to miss (a client id is not a user id) and the
++    # caller lands on 401, the safe behaviour is to reject the token at the
++    # type layer instead of relying on a database lookup to fail. This is
++    # the same check ``decode_portal_token`` already applies in reverse.
+     try:
+         payload = jwt.decode(token, get_settings().secret_key, algorithms=["HS256"])
+-        return payload.get("sub")
+     except jwt.PyJWTError:
+         return None
++    if payload.get("type") is not None:
++        # Anything carrying a ``type`` claim (portal tokens today, anything
++        # we add later) is not an agency access token.
++        return None
++    return payload.get("sub")
+ 
+ 
+ def create_portal_token(client_id: str, portal_slug: str, portal_user_id: str | None = None) -> str:
+diff --git a/apps/api/app/tenant.py b/apps/api/app/tenant.py
+new file mode 100644
+index 0000000..2cd3c5f
+--- /dev/null
++++ b/apps/api/app/tenant.py
+@@ -0,0 +1,112 @@
++"""Multi-tenancy foundation primitives.
++
++This module is the single place the agency the current request belongs to is
++resolved, and the single place ownership of a tenant-scoped row is checked.
++
++Why a dedicated module
++----------------------
++Before this module every router that needed the current agency reached for
++``user.agency_id`` directly and re-implemented the same check inline. That is
++workable while there is one shape of authenticated principal, but it is a
++fragile foundation for the multi-tenant SaaS the project is becoming:
++
++* a future Super Admin principal carries no ``agency_id`` at all, and the
++  decision "the super admin is not bound to a tenant" must live in exactly one
++  place, not be re-decided in 24 routers;
++* a developer adding a new endpoint can forget the ``agency_id == user.agency_id``
++  clause and silently leak another agency's data — the helper here is what
++  they reach for instead of writing the clause from scratch;
++* background jobs resolve the agency from a row, not from a cookie, and need
++  the same ownership check without re-implementing it.
++
++What this module does NOT do
++----------------------------
++It does not rewrite existing routers. They keep their inline
++``Client.agency_id == user.agency_id`` clauses — those continue to work and
++this module is the documented home for the next ones. Refactoring every
++endpoint to call into here is a separate, larger change that must be made one
++router at a time.
++
++It does not touch the database. Every column it needs (``users.agency_id``)
++already exists from migration ``0001_initial``.
++
++It does not introduce a JWT ``type`` claim of its own. The agency JWT keeps the
++shape ``security.create_access_token`` already produces; only ``decode_access_token``
++becomes strict about rejecting tokens that carry ``type=portal`` (which it
++already should have).
++"""
++
++from __future__ import annotations
++
++import uuid
++from typing import Any, Protocol
++
++from fastapi import Depends, HTTPException, status
++from sqlalchemy.orm import Session
++
++from .database import get_db
++from .deps import get_current_user
++from .models import User
++
++
++class TenantOwned(Protocol):
++    """Anything that carries an ``agency_id`` column.
++
++    The concrete models (``Agency``, ``User``, ``Client``, ``Agent``,
++    ``Conversation``, ``WhatsAppChannel`` …) all expose ``agency_id`` as a
++    non-null UUID column. ``Protocol`` keeps the helper open to those models
++    without coupling it to a fixed list, so a new tenant-owned table needs no
++    change here.
++    """
++
++    agency_id: uuid.UUID
++
++
++def get_current_agency_id(user: User = Depends(get_current_user)) -> uuid.UUID:
++    """Resolve the agency the current request belongs to.
++
++    A single dependency every tenant-scoped endpoint can depend on instead of
++    reading ``user.agency_id`` inline. Today the source is the authenticated
++    ``User`` row; tomorrow the same dependency can branch on a Super Admin
++    principal without every router changing.
++
++    Fails closed (401) when the authenticated user has no agency — a User row
++    with a NULL ``agency_id`` cannot exist given the column is NOT NULL, but
++    the check keeps the dependency honest if that constraint is ever relaxed
++    for an off-platform account (super admins, internal service accounts).
++    """
++
++    if user.agency_id is None:  # pragma: no cover - column is NOT NULL today
++        raise HTTPException(
++            status_code=status.HTTP_401_UNAUTHORIZED,
++            detail="The account is not bound to an agency",
++        )
++    return user.agency_id
++
++
++def assert_tenant_owned(
++    record: Any,
++    agency_id: uuid.UUID,
++    *,
++    agency_attr: str = "agency_id",
++) -> None:
++    """Fail-closed ownership check for a tenant-scoped row.
++
++    Use after fetching a row by id (or after building it in memory) to confirm
++    it belongs to ``agency_id`` before returning, mutating or deleting it.
++
++    Fail-closed means a row whose ``agency_attr`` is None is rejected: an
++    unscoped row in a multi-tenant table is a data integrity problem, and
++    returning it would be a leak even if the caller happens to be the same
++    agency the row should have belonged to.
++
++    The helper raises ``404 Not Found`` rather than ``403 Forbidden``: the
++    row may well exist, but a tenant who does not own it must learn nothing
++    about it, not even that it exists under another agency. This matches the
++    convention every existing ``_client``/``_conversation`` helper already
++    follows.
++    """
++
++    record_agency = getattr(record, agency_attr, None)
++    if record_agency is None or record_agency != agency_id:
++        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+diff --git a/apps/api/tests/conftest_tenant.py b/apps/api/tests/conftest_tenant.py
+new file mode 100644
+index 0000000..21ae0b9
+--- /dev/null
++++ b/apps/api/tests/conftest_tenant.py
+@@ -0,0 +1,15 @@
++"""Test configuration additions for the multi-tenancy foundation.
++
++Registers the ``integration`` marker so ``pytest -m "not integration"``
++keeps the suite green on a host with no PostgreSQL. The marker is the only
++addition; the existing ``conftest.py`` continues to drive fixtures.
++"""
++
++import pytest
++
++
++def pytest_configure(config):
++    config.addinivalue_line(
++        "markers",
++        "integration: tests that need a live PostgreSQL test database",
++    )
+diff --git a/apps/api/tests/test_tenant_foundation.py b/apps/api/tests/test_tenant_foundation.py
+new file mode 100644
+index 0000000..a22cf7e
+--- /dev/null
++++ b/apps/api/tests/test_tenant_foundation.py
+@@ -0,0 +1,256 @@
++"""Multi-tenancy foundation tests.
++
++Three layers of evidence:
++
++1. **Pure unit tests** of ``assert_tenant_owned`` — no database, no FastAPI.
++   These always run; they prove the helper's behaviour (404 on mismatch,
++   404 on None agency, pass on match) at the language level.
++
++2. **JWT strictness tests** of ``decode_access_token`` after the type-check
++   fix — no database, no FastAPI. These prove a portal token is no longer
++   accepted as an agency token.
++
++3. **Runtime isolation tests** that go through the demo router with two
++   real agencies and a real (test) Postgres. These prove end-to-end that
++   agency A cannot read agency B's client through the foundation
++   primitives. They are marked ``@pytest.mark.integration`` and require a
++   running PostgreSQL test database; when none is available they are
++   skipped, not silently passed.
++"""
++
++from __future__ import annotations
++
++import uuid
++
++import pytest
++
++from app.security import create_access_token, create_portal_token, decode_access_token
++from app.tenant import assert_tenant_owned
++
++
++# ---------------------------------------------------------------------------
++# 1. Pure unit tests of the ownership helper — no DB, no FastAPI.
++# ---------------------------------------------------------------------------
++
++
++class _Stub:
++    """Tiny stand-in for a SQLAlchemy row.
++
++    ``assert_tenant_owned`` only reads one attribute, so a plain object is a
++    faithful and dependency-free substitute for a model instance.
++    """
++
++    def __init__(self, agency_id: uuid.UUID | None) -> None:
++        self.agency_id = agency_id
++
++
++def test_assert_tenant_owned_passes_when_agency_matches():
++    agency = uuid.uuid4()
++    record = _Stub(agency)
++    # No exception means pass.
++    assert_tenant_owned(record, agency)
++
++
++def test_assert_tenant_owned_rejects_other_agency_with_404():
++    owner = uuid.uuid4()
++    intruder = uuid.uuid4()
++    record = _Stub(owner)
++    from fastapi import HTTPException
++
++    with pytest.raises(HTTPException) as exc:
++        assert_tenant_owned(record, intruder)
++    assert exc.value.status_code == 404
++    # The detail must not leak whose row it is.
++    assert "agency" not in exc.value.detail.lower()
++
++
++def test_assert_tenant_owned_fails_closed_on_missing_agency_id():
++    """A row without an ``agency_id`` is a data-integrity problem; the
++    helper rejects it rather than silently letting the request through."""
++    agency = uuid.uuid4()
++    record = _Stub(None)
++    from fastapi import HTTPException
++
++    with pytest.raises(HTTPException) as exc:
++        assert_tenant_owned(record, agency)
++    assert exc.value.status_code == 404
++
++
++def test_assert_tenant_owned_supports_custom_attr():
++    """Some tables scope by ``client_id`` first; the helper must still work
++    when the column is reached through a different attribute name."""
++    client_id = uuid.uuid4()
++    record = _Stub(None)  # ``agency_id`` is None on purpose
++    record.client_id = client_id
++    assert_tenant_owned(record, client_id, agency_attr="client_id")
++
++
++# ---------------------------------------------------------------------------
++# 2. JWT type-strictness tests of decode_access_token.
++# ---------------------------------------------------------------------------
++
++
++def test_decode_access_token_rejects_portal_token():
++    """The Class B weakness documented in Phase 0.C: a portal token must
++    not decode as an agency token even though both are signed with the same
++    ``secret_key``."""
++    client_id = str(uuid.uuid4())
++    portal_token = create_portal_token(client_id, "portal-slug", portal_user_id=str(uuid.uuid4()))
++    # Before the fix this returned the ``client_id``; after the fix it must
++    # return None because the payload carries ``type=portal``.
++    assert decode_access_token(portal_token) is None
++
++
++def test_decode_access_token_accepts_agency_token_without_type_claim():
++    """Regression guard: the fix must not break the legitimate agency
++    token, which carries no ``type`` claim at all."""
++    user_id = str(uuid.uuid4())
++    agency_token = create_access_token(user_id)
++    assert decode_access_token(agency_token) == user_id
++
++
++def test_decode_access_token_rejects_garbage():
++    assert decode_access_token("not.a.jwt") is None
++    assert decode_access_token("") is None
++
++
++# ---------------------------------------------------------------------------
++# 3. Runtime cross-tenant isolation — needs a real PostgreSQL test DB.
++# ---------------------------------------------------------------------------
++
++integration = pytest.mark.integration
++
++
++def _postgres_available() -> bool:
++    """Detect a live PostgreSQL test database the way the suite already
++    configures it: ``TEST_DATABASE_URL`` or the default local DSN."""
++    import os
++
++    from sqlalchemy import create_engine
++    from sqlalchemy.exc import OperationalError
++
++    url = os.environ.get(
++        "TEST_DATABASE_URL",
++        "postgresql+psycopg://openlivery:openlivery@localhost:5432/openlivery_test",
++    )
++    try:
++        engine = create_engine(url, pool_pre_ping=True)
++        with engine.connect() as conn:
++            conn.exec_driver_sql("SELECT 1")
++        return True
++    except OperationalError:
++        return False
++    except Exception:  # noqa: BLE001 — any failure means unavailable
++        return False
++
++
++_HAVE_PG = _postgres_available()
++
++
++@integration
++@pytest.mark.skipif(not _HAVE_PG, reason="PostgreSQL test database unavailable")
++def test_agency_a_cannot_read_agency_b_client(authenticated_client):
++    """End-to-end: agency A registers, creates a client; agency B registers
++    separately, and the demo router must deny B access to A's client.
++
++    Uses the existing ``authenticated_client`` fixture which registers one
++    agency; we register the second one out-of-band by swapping the cookie.
++    """
++    import uuid as _uuid
++
++    from fastapi.testclient import TestClient
++
++    from app.database import get_db
++    from app.models import Agency, Client, User, new_uuid
++    from app.security import hash_password
++
++    # --- Agency A: register through the API so the cookie is set. ---------
++    agency_a_client_id_resp = authenticated_client.post(
++        "/api/clients", json={"name": "Alpha Shop"}
++    )
++    assert agency_a_client_id_resp.status_code == 201
++    agency_a_client = agency_a_client_id_resp.json()
++
++    # --- Agency B: register directly against the DB, since the API closes
++    #     registration after the first agency is created (single-agency
++    #     lock — known issue, separate phase). We then sign in as B. -------
++    a_cookie = authenticated_client.cookies.get("access_token")
++    assert a_cookie, "agency A cookie must be set after register"
++
++    # Direct DB insert for agency B (the registration endpoint would refuse).
++    with app_database_session() as db:
++        agency_b = Agency(name="Beta Shop", slug="beta-shop-" + _uuid.uuid4().hex[:8])
++        user_b = User(
++            agency=agency_b,
++            name="Beta Admin",
++            email="beta@example.com",
++            password_hash=hash_password("beta-password-secure"),
++        )
++        db.add(user_b)
++        db.commit()
++        db.refresh(user_b)
++        user_b_id = str(user_b.id)
++
++    # Sign in as B and steal its cookie.
++    # We can't call /api/auth/register (closed) and /api/auth/login is the
++    # path that already works. Issue a login through the same TestClient
++    # instance, but TestClient shares cookie jar across requests, so we open
++    # a fresh client instead.
++    from app.main import app
++
++    fresh = TestClient(app)
++    login_resp = fresh.post("/api/auth/login", json={"email": "beta@example.com", "password": "beta-password-secure"})
++    assert login_resp.status_code == 200, login_resp.text
++
++    # --- Try to read A's client through the demo router as B. -------------
++    target = f"/api/tenancy/clients/{agency_a_client['id']}"
++    denied = fresh.get(target)
++    assert denied.status_code == 404, (
++        f"cross-tenant leak: agency B accessed agency A's client, got {denied.status_code} {denied.text}"
++    )
++
++    # --- Sanity: as A, the same client is reachable. ----------------------
++    own = authenticated_client.get(target)
++    assert own.status_code == 200
++    assert own.json()["id"] == agency_a_client["id"]
++
++
++@integration
++@pytest.mark.skipif(not _HAVE_PG, reason="PostgreSQL test database unavailable")
++def test_missing_tenant_context_is_rejected(authenticated_client):
++    """An unauthenticated request to the demo router must 401, not 200 or
++    leak any tenant data."""
++    import uuid as _uuid
++
++    from fastapi.testclient import TestClient
++
++    from app.main import app
++
++    unauth = TestClient(app)
++    target = f"/api/tenancy/clients/{_uuid.uuid4()}"
++    denied = unauth.get(target)
++    assert denied.status_code == 401, denied.text
++
++
++# ---------------------------------------------------------------------------
++# Helper: open a DB session outside the request flow.
++# ---------------------------------------------------------------------------
++
++
++def app_database_session():
++    """A context manager that yields a SQLAlchemy session against the same
++    engine the app uses. Used only by the integration tests above to seed a
++    second agency while registration is closed."""
++    from contextlib import contextmanager
++
++    from app.database import new_session
++
++    @contextmanager
++    def _cm():
++        db = new_session()
++        try:
++            yield db
++        finally:
++            db.close()
++
++    return _cm()
