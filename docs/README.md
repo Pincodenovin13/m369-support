@@ -52,13 +52,6 @@ These are the authoritative sources of truth. When in doubt, consult these first
 | Environment variables | [`docs/development/environment.md`](./development/environment.md) | All env vars with descriptions |
 | Testing | [`docs/development/testing.md`](./development/testing.md) | Test architecture, how to run, what's covered, verification status |
 
-### Project Structure (Legacy)
-
-| Document | Path | Status |
-|---|---|---|
-| Project structure | [`docs/PROJECT_STRUCTURE.md`](./PROJECT_STRUCTURE.md) | ⚠️ LEGACY — superseded by [`/REPOSITORY_MAP.md`](../REPOSITORY_MAP.md). Preserved as historical snapshot. |
-| Phase 1 backend continuation | [`docs/PHASE1_BACKEND_CONTINUATION.md`](./PHASE1_BACKEND_CONTINUATION.md) | ⚠️ Historical — Stages 1-4 completion log. Not actively maintained. |
-
 ---
 
 ## Historical Archive (NOT AUTHORITATIVE)
