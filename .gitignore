@@ -94,3 +94,5 @@ logs/
 *.tar.gz
 *.zip
 *.patch
+# Exception: historical patches preserved under recovery/workspace-preservation/
+!recovery/workspace-preservation/patches/**/*.patch
