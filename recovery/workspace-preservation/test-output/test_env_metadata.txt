@@ -1,3 +1,6 @@
+> ⚠️ HISTORICAL SNAPSHOT — sandbox environment metadata from Nov 3, 2026.
+> Not current. For current environment, see /STATE.md.
+
 Python: 3.12.16
 Platform: Linux-5.10.134-013.15.kangaroo.al8.x86_64-x86_64-with-glibc2.41
 SQLAlchemy: 2.0.43

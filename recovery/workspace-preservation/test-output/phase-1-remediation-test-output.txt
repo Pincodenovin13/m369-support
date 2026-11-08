@@ -1,3 +1,6 @@
+> ⚠️ HISTORICAL TEST OUTPUT — Z.ai-reported, NOT independently verified.
+> This is NOT proof of current test execution. For current test status, see /STATE.md.
+
 ============================= test session starts ==============================
 platform linux -- Python 3.12.16, pytest-8.3.4, pluggy-1.6.0 -- /home/z/.venv/bin/python3
 cachedir: .pytest_cache

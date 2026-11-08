@@ -1,3 +1,9 @@
+> ⚠️ **ARCHIVED — HISTORICAL SNAPSHOT — NOT CURRENT STATUS**
+>
+> This file is a snapshot from Nov 8, 2026. The counts and SHAs reflect the
+> state at the time of writing, NOT the current repository state. For current
+> state, see `/STATE.md`.
+
 # M369 Support — Full Workspace Recovery Inventory
 
 > **Generated:** 2026-11-08 (UTC+8)

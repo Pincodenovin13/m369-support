@@ -1,3 +1,7 @@
+> ⚠️ HISTORICAL PATCH — DO NOT REAPPLY. This patch is already integrated into the
+> current source history (commits on phase-1/foundation or phase-1/security-closure-b1-4).
+> Reapplying would cause conflicts. Preserved for historical reference only.
+
 diff --git a/apps/api/app/main.py b/apps/api/app/main.py
 index 3c29653..2ddf89b 100644
 --- a/apps/api/app/main.py

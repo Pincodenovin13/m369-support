@@ -1,3 +1,10 @@
+> ⚠️ **ARCHIVED — HISTORICAL SNAPSHOT — NOT CURRENT STATUS**
+>
+> This file is a snapshot from Nov 8, 2026. The Rule 13 patch it describes has
+> been successfully applied as commit `79b4311` on the
+> `recovery/zai-workspace-2026-11-08` branch. This report is no longer
+> actionable. For current state, see `/STATE.md`.
+
 # M369 Support — Rule 13 Patch Delivery
 
 > **Delivery date:** 2026-11-08 (UTC+8)

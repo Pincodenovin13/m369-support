@@ -1,3 +1,7 @@
+> ⚠️ HISTORICAL PATCH — DO NOT REAPPLY. This patch is already integrated into the
+> current source history (commits on phase-1/foundation or phase-1/security-closure-b1-4).
+> Reapplying would cause conflicts. Preserved for historical reference only.
+
 From 853b55778e1e5ba7abac5ab7c1976346e1dc25dc Mon Sep 17 00:00:00 2001
 From: Z User <z@container>
 Date: Thu, 5 Nov 2026 23:36:17 +0000

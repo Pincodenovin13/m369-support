@@ -1,3 +1,13 @@
+> ⚠️ **ARCHIVED — LEGACY — CONTAINS OPENLIVERY MATERIAL — DO NOT USE AS M369 SOURCE**
+>
+> This file is a historical artifact from Nov 3, 2026. It contains references
+> to OpenLivery, an external product. Per M369 project rules: "Do not use
+> OpenLivery as a source, template, or architectural reference. M369 is an
+> independent greenfield product."
+>
+> This file must NEVER be used as an M369 implementation source.
+> Preserved for historical audit only.
+
 # M369 Support — Backend Multi-Tenancy Foundation
 ## Implementation Delivery Report
 

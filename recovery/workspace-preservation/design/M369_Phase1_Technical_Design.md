@@ -1,3 +1,12 @@
+> ⚠️ **ARCHIVED — HISTORICAL — NOT AUTHORITATIVE**
+>
+> This file is a historical artifact from Nov 5, 2026. It is preserved for
+> reference only and is NOT the current source of truth. For current
+> architecture, see `/ARCHITECTURE.md` (when created) or `/STATE.md`.
+>
+> This document may contain outdated architecture or superseded designs.
+> Do NOT use it as an implementation reference.
+
 # M369 Support — Phase 1 Technical Design Document
 
 **Document version:** 1.0
