@@ -394,7 +394,8 @@ class Payment(Base, TimestampMixin):
             name="ck_payments_amounts_nonneg",
         ),
         CheckConstraint(
-            "paid_amount_raw IS NULL OR paid_amount_raw >= 0",
+            "paid_amount_raw IS NULL OR (paid_amount_raw >= 0 AND paid_amount_raw <= "
+            "115792089237316195423570985008687907853269984665640564039457584007913129639935)",
             name="ck_payments_raw_amount_nonneg",
         ),
         Index("ix_payments_subscription_status", "subscription_id", "status"),
