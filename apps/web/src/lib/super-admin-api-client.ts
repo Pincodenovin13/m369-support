@@ -101,6 +101,17 @@ export interface PaymentOut {
   created_at: string;
 }
 
+export interface SuperAdminAuditLogOut {
+  id: number;
+  super_admin_id: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  metadata_: Record<string, unknown>;
+  ip_address: string | null;
+  created_at: string;
+}
+
 export class SuperAdminApiError extends Error {
   readonly status: number;
   readonly detail: unknown;
@@ -262,6 +273,12 @@ export const superAdminApi = {
     },
     reject(paymentId: string, failure_reason: string): Promise<PaymentOut> {
       return request(`/payments/${paymentId}/reject`, { method: "POST", body: JSON.stringify({ failure_reason }) });
+    },
+  },
+,
+  auditLogs: {
+    list(params?: { action?: string; super_admin_id?: string; since?: string; until?: string; limit?: number; offset?: number }): Promise<PaginatedResponse<SuperAdminAuditLogOut>> {
+      return request(`/audit-logs${query(params)}`);
     },
   },
 };
