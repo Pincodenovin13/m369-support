@@ -73,21 +73,19 @@ class Base(DeclarativeBase):
 # ---------------------------------------------------------------------------
 
 
-TENANT_GUC = "app.tenant_id"
-
-
 @event.listens_for(Session, "after_begin")
-def _reissue_tenant_guc_on_txn_begin(session: Session, transaction: Any, connection: Any) -> None:
-    """After a new transaction starts, re-apply the tenant GUC if set.
-
-    ``SET LOCAL`` only lasts for the current transaction. After commit /
-    rollback the GUC is gone. This listener restores it from
-    ``session.info`` so subsequent SELECTs (e.g. ``db.refresh``) hit RLS
-    with the correct tenant context.
-    """
+def _reissue_signed_tenant_context(session: Session, transaction: Any, connection: Any) -> None:
+    """Restore both signed GUCs after every transaction restart."""
+    if session.info.get("is_super_admin"):
+        return
     tenant_id = session.info.get("tenant_id")
-    if tenant_id is not None:
-        connection.execute(text(f"SET LOCAL {TENANT_GUC} = '{tenant_id}'"))
+    signature = session.info.get("tenant_signature")
+    if tenant_id is not None and signature is not None:
+        connection.execute(
+            text("SELECT pg_catalog.set_config('app.tenant_id', :tenant_id, true), "
+                 "pg_catalog.set_config('app.tenant_sig', :signature, true)"),
+            {"tenant_id": tenant_id, "signature": signature},
+        )
 
 
 def get_db() -> Iterator[Session]:

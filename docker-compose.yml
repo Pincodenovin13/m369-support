@@ -50,6 +50,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/m369_support
       M369_SA_AUTH_PASSWORD: ${M369_SA_AUTH_PASSWORD:?M369_SA_AUTH_PASSWORD must be set}
+      M369_TENANT_CONTEXT_SECRET: ${M369_TENANT_CONTEXT_SECRET:?M369_TENANT_CONTEXT_SECRET must be set}
     depends_on:
       db:
         condition: service_healthy

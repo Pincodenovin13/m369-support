@@ -1,0 +1,51 @@
+name: API PostgreSQL security tests
+
+on:
+  push:
+    branches:
+      - refactor/repository-structure-unification
+  pull_request:
+    branches:
+      - refactor/repository-structure-unification
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/requirements-dev.txt
+      - name: Install API and test dependencies
+        working-directory: apps/api
+        run: pip install -r requirements-dev.txt
+      - name: Create isolated test database
+        run: createdb -h localhost -U postgres m369_support_test
+        env:
+          PGPASSWORD: postgres
+      - name: Run integration and security suite
+        working-directory: apps/api
+        env:
+          M369_TENANT_CONTEXT_SECRET: test-only-m369-tenant-context-secret-000000000000000000000001
+          RATE_LIMIT_ENABLED: "false"
+          ENVIRONMENT: test
+        run: pytest -q

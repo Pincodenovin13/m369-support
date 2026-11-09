@@ -17,6 +17,7 @@ import psycopg.errors
 import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from app.tenancy.context import tenant_context_signature
 
 
 pytestmark = [pytest.mark.security, pytest.mark.integration]
@@ -90,6 +91,7 @@ def test_set_local_bypass_rls_does_not_leak_cross_tenant(db_engine, setup_sessio
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT set_config('app.tenant_id', %s, true)", (ids["agency_a_id"],))
+            cur.execute("SELECT set_config('app.tenant_sig', %s, true)", (tenant_context_signature(ids["agency_a_id"]),))
             cur.execute("SET LOCAL app.bypass_rls = 'on'")
 
             cur.execute("SELECT email FROM contacts ORDER BY email")
@@ -120,6 +122,7 @@ def test_set_session_bypass_rls_does_not_leak_cross_tenant(db_engine, setup_sess
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT set_config('app.tenant_id', %s, false)", (ids["agency_a_id"],))
+            cur.execute("SELECT set_config('app.tenant_sig', %s, false)", (tenant_context_signature(ids["agency_a_id"]),))
             cur.execute("SET app.bypass_rls = 'on'")
 
             cur.execute("SELECT email FROM contacts ORDER BY email")
@@ -213,6 +216,7 @@ def test_cross_tenant_insert_blocked_by_rls(db_engine, setup_session):
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT set_config('app.tenant_id', %s, true)", (ids["agency_a_id"],))
+            cur.execute("SELECT set_config('app.tenant_sig', %s, true)", (tenant_context_signature(ids["agency_a_id"]),))
 
             new_contact_id = str(uuid.uuid4())
             with pytest.raises(psycopg.errors.Error) as exc_info:
@@ -246,6 +250,7 @@ def test_cross_tenant_update_blocked_by_rls(db_engine, setup_session):
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT set_config('app.tenant_id', %s, true)", (ids["agency_a_id"],))
+            cur.execute("SELECT set_config('app.tenant_sig', %s, true)", (tenant_context_signature(ids["agency_a_id"]),))
 
             cur.execute(
                 "UPDATE contacts SET name = 'Hacked' WHERE email = 'b@agency-b.com'"
@@ -271,6 +276,7 @@ def test_cross_tenant_delete_blocked_by_rls(db_engine, setup_session):
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT set_config('app.tenant_id', %s, true)", (ids["agency_a_id"],))
+            cur.execute("SELECT set_config('app.tenant_sig', %s, true)", (tenant_context_signature(ids["agency_a_id"]),))
 
             cur.execute("DELETE FROM contacts WHERE email = 'b@agency-b.com'")
             assert cur.rowcount == 0, (

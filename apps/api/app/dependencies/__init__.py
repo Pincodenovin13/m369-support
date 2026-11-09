@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..db.database import get_db, get_super_admin_db
 from ..models import Agency, AgencyMembership, SuperAdmin, User
 from ..security import decode_access_token, decode_super_admin_token
-from ..tenancy.context import TenantContext
+from ..tenancy.context import TenantContext, set_tenant_context
 
 
 def _extract_bearer_or_cookie(request: Request, cookie_name: str = "access_token") -> str | None:
@@ -124,12 +124,9 @@ def get_current_user(
             detail="Session revoked",
         )
 
-    # Set tenant context on the DB session so RLS policies filter automatically.
-    # We also stash it in session.info so the after_begin event listener can
-    # re-issue SET LOCAL after every commit/rollback (RLS GUC persistence).
+    # Apply the signed tenant context; raw tenant GUCs are never trusted.
     if ctx.agency_id is not None:
-        db.info["tenant_id"] = str(ctx.agency_id)
-        db.execute(text(f"SET LOCAL app.tenant_id = '{ctx.agency_id}'"))
+        set_tenant_context(db, ctx.agency_id)
     return user
 
 

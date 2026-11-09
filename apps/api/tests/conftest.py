@@ -39,6 +39,7 @@ os.environ["DATABASE_URL"] = M369_APP_DB_URL
 os.environ["TEST_DATABASE_URL"] = SETUP_DB_URL
 os.environ["DATABASE_URL_SUPER_ADMIN"] = SA_DB_URL
 os.environ["DATABASE_URL_SUPER_ADMIN_AUTH"] = SA_AUTH_DB_URL
+os.environ.setdefault("M369_TENANT_CONTEXT_SECRET", "test-only-m369-tenant-context-secret-000000000000000000000001")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("ENVIRONMENT", "test")
 

@@ -81,6 +81,9 @@ class Settings(BaseSettings):
         )
     )
 
+    # --- Database RLS tenant-context signing ---
+    tenant_context_secret: str = Field(default="dev-only-m369-tenant-context-secret-change-before-production-0001")
+
     # --- JWT ---
     jwt_secret_key: str = Field(
         default="dev-only-change-this-to-64-char-random-string-in-production-please"
@@ -165,6 +168,8 @@ class Settings(BaseSettings):
             return self
 
         violations: list[str] = []
+        if len(self.tenant_context_secret.encode("utf-8")) < 32 or self.tenant_context_secret.startswith("dev-only-"):
+            violations.append("M369_TENANT_CONTEXT_SECRET is missing, too short, or a dev default")
         if self.jwt_secret_key in _DEV_DEFAULTS:
             violations.append("JWT_SECRET_KEY is a dev default")
         if self.jwt_super_admin_secret_key in _DEV_DEFAULTS:
