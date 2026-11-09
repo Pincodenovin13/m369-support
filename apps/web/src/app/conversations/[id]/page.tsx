@@ -50,7 +50,7 @@ export default function ConversationDetailPage() {
     if (!reply.trim() || sending || !conversation) return;
     setSending(true);
     try {
-      const msg = await messageApi.send({ conversation_id: conversation.id, sender_type: "agent", body: reply.trim() });
+      const msg = await messageApi.send({ conversation_id: conversation.id, content: reply.trim(), is_internal: false });
       setMessages((prev) => [...prev, msg]);
       setReply("");
     } catch (err) {
@@ -116,9 +116,9 @@ export default function ConversationDetailPage() {
                         : "bg-gray-200 text-gray-900"
                   }`}
                 >
-                  <div className="whitespace-pre-wrap break-words">{m.body}</div>
+                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
                   <div className={`text-xs mt-1 ${m.sender_type === "agent" ? "text-brand-100" : "text-gray-500"}`}>
-                    {new Date(m.created_at).toLocaleTimeString()} · {m.sender_type}
+                    {new Date(m.created_at).toLocaleTimeString()} · {m.sender_type}{m.is_internal ? " · Internal note" : ""}
                   </div>
                 </div>
               </div>
