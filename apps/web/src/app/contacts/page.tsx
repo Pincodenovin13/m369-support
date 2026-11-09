@@ -16,7 +16,7 @@ export default function ContactsPage() {
   useEffect(() => {
     if (!user) return;
     setListLoading(true);
-    contactApi.list({ q: search || undefined, limit: 50 })
+    contactApi.list({ search: search || undefined, limit: 50 })
       .then((res: PaginatedResponse<ContactOut>) => {
         setContacts(res.items);
         setListLoading(false);
