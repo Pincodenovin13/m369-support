@@ -38,7 +38,7 @@ def upgrade() -> None:
     # A stale membership in either direction could make SET ROLE or inherited
     # privileges possible. Remove every membership involving this role.
     op.execute("""
-      DO $
+      DO $$
       DECLARE m record;
       BEGIN
         FOR m IN
@@ -104,7 +104,7 @@ def upgrade() -> None:
     op.execute("CREATE POLICY agency_notes_platform_private ON public.agency_notes USING(false) WITH CHECK(false)")
     # Fail migration if an unexpected permissive policy could OR-bypass RLS.
     op.execute("""
-      DO $
+      DO $$
       DECLARE t text; policy_count integer;
       BEGIN
         FOREACH t IN ARRAY ARRAY[
