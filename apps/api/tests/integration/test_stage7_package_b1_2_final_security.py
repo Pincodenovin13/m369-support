@@ -556,7 +556,7 @@ def test_MIG_01_unsafe_downgrade_is_refused_and_schema_is_preserved():
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
-            assert cur.fetchone()[0] == "0019_signed_tenant_context_rls"
+            assert cur.fetchone()[0] == "0020_payment_raw_amount_precision"
             cur.execute("SELECT COUNT(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='m369_current_tenant_id'")
             assert cur.fetchone()[0] == 1, "signed tenant verifier disappeared after refused downgrade"
     finally:
@@ -577,7 +577,7 @@ def test_MIG_02_existing_data_preserved(setup_session):
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0019_signed_tenant_context_rls", f"head is {v}"
+            assert v == "0020_payment_raw_amount_precision", f"head is {v}"
     finally:
         conn.close()
 
