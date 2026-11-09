@@ -2,11 +2,12 @@
 
 > Last reconciled: 2026-11-09 (UTC)
 > Active development branch: `refactor/repository-structure-unification`
-> Active HEAD: resolve from the live GitHub branch ref; latest verified application-code snapshot: `ce3d54a2df13494ee914bea2f0677dd11f736a0c`
+> Active HEAD: resolve from live GitHub branch ref; last audited repository snapshot: `dc389d75d6a19265a6a0cb639b1ae8247abe5cd8` (this state reconciliation changes documentation only)
 > GitHub default branch: `test/marker` (still a one-file marker branch; NOT the development source of truth)
-> Tracked files before current documentation additions: 201 (one obsolete auto-mutating workflow removed)
+> Tracked files on current active HEAD: 203
 > Alembic head: `0020_payment_raw_amount_precision` (20 linear migrations)
 > Production deployment database: NOT inspected
+> Production deployment configuration: NOT ready; current docker-compose.yml is local-development only
 
 ## 1. Source-of-truth rules
 
@@ -59,6 +60,8 @@ Repeated basenames such as `README.md`, `page.tsx`, `auth.py`, `agencies.py`, an
 
 ## 4. Latest CI evidence
 
+A fresh API/PostgreSQL workflow ran on API README reconciliation commit `cf66a4fabbc58a27424950b0f792e3f4cbc9e686`: [run 42654977524](https://github.com/Pincodenovin13/m369-support/actions/runs/42654977524) completed successfully, **359 passed, 1 warning in 93.61s**. Application source/tests were unchanged from the previously audited tested snapshot.
+
 ### API / PostgreSQL
 
 - Workflow: [API PostgreSQL security tests](https://github.com/Pincodenovin13/m369-support/actions/runs/42646416006)
@@ -67,14 +70,14 @@ Repeated basenames such as `README.md`, `page.tsx`, `auth.py`, `agencies.py`, an
 - Command: `pytest -q tests`
 - Result: **359 passed, 1 warning**, 92.52 seconds
 - PostgreSQL service: 16
-- Warning: Starlette TestClient uses deprecated `anyio.abc.BlockingPortal`; GitHub runner also reports Node.js 20 action-runtime deprecation for checkout/setup-python.
+- Warning: Starlette TestClient uses deprecated `anyio.abc.BlockingPortal`; GitHub runner also reports Node.js action-runtime deprecation and Python environment `punycode` deprecation.
 - No skipped count is asserted here because the captured pytest summary reports only passed count and warnings.
 
 ### Frontend
 
-- Workflow: [Web frontend CI](https://github.com/Pincodenovin13/m369-support/actions/runs/42628470610)
+- Workflow: [Web frontend CI](https://github.com/Pincodenovin13/m369-support/actions/runs/42654983328)
 - Result: success for `npm ci`, `npm audit --audit-level=low`, TypeScript, ESLint and production build.
-- This run is on the dashboard frontend commit. The subsequent commits through current HEAD changed backend tests/documentation, not frontend source; frontend CI was not re-triggered by docs-only changes.
+- Latest frontend docs reconciliation triggered CI on `376b3b25beba303b0fef9cd5a2b77e386c194258`; all frontend checks completed successfully.
 
 CI success is tied to the tested commit and workflow scope. It does not certify production deployment or all user workflows.
 
@@ -96,9 +99,9 @@ Do not infer live production role attributes, grants, RLS policies, or secret pr
 2. Verify all PostgreSQL role memberships, effective grants, SECURITY DEFINER ownership/search_path and secret access in the actual deployment database.
 3. Verify real Redis behavior, limiter fail-closed behavior, production proxy trust configuration and rate-limit keying.
 4. Review request-size limits, security headers, upload/attachment handling, webhook ingress and abuse/DoS controls.
-5. Run deployment smoke tests and independent security review before onboarding paying agencies.
-6. Inspect and resolve CI/toolchain deprecation warnings.
-7. Keep all future RLS changes covered by catalog-driven tests and hostile tenant-A/tenant-B tests.
+5. Implement and review a production Compose/release configuration; current Compose bind-mounts source and runs Uvicorn --reload, so it is local-only.\n6. Run deployment smoke tests and independent security review before onboarding paying agencies.
+7. Inspect and resolve CI/toolchain deprecation warnings.
+8. Keep all future RLS changes covered by catalog-driven tests and hostile tenant-A/tenant-B tests.
 
 **Security status:** repository CI pass; security closure incomplete; production security certification NOT CLAIMED.
 
@@ -119,10 +122,10 @@ See `docs/architecture/future-capabilities-roadmap.md` for the approved planning
 - GitHub default branch is the one-file `test/marker` branch; active code is on the branch stated above.
 - Historical branches remain visible as checkpoints. They are currently ancestors of active HEAD, not divergent lines.
 - Historical `recovery/workspace-preservation/` contains archived OpenLivery references. Its README explicitly marks those files as non-authoritative; do not import or reuse them.
-- `.github/workflows/refresh-web-lockfile.yml` was removed in commit `6043cfffe0ee4642fc55c4811f6ae87c481ca9ec`. Dependency changes are now explicit, reviewed changes; web CI installs the committed lockfile with `npm ci` and does not mutate/push it.
+- `.github/workflows/refresh-web-lockfile.yml` was removed in commit `6043cfffe0ee4642fc55c4811f6ae87c481ca9ec`. Dependency changes are now explicit, reviewed changes; web CI installs the committed lockfile with `npm ci` and does not mutate/push it. No worker/queue implementation or worker directory currently exists; future background processing is a roadmap capability and should initially run on the same VPS with strict limits.
 - Several documentation files previously contained stale branch, migration, test-count and security claims. They are being reconciled against this state and current CI evidence.
 
-## 9. Immediate next sequence
+## 9. Deployment and cost constraints\n\n- `docs/deployment/production-operations.md` is the owner learning/runbook draft for domain, VPS, DNS, TLS, backups, updates and rollback. It is not deployment approval.\n- Initial cost target is one VPS and Docker Compose containers on that host; no separate worker VPS, managed database, Kubernetes or paid Redis cluster without measured justification.\n- Current `docker-compose.yml` is local-only: source bind mount and Uvicorn `--reload`; a hardened production configuration remains unimplemented.\n- Super Admin management DB credentials are currently injected into the API process; route-level privilege boundaries and production secret handling remain security gates.\n\n## 10. Immediate next sequence
 
 1. Finish repository/documentation consistency reconciliation without deleting historical evidence.
 2. Resolve default-branch configuration and branch protection explicitly.

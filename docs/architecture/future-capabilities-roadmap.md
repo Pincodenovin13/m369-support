@@ -56,14 +56,14 @@ These are examples from product discussion, not approved prices. The meaning of 
 
 - Reuse the existing plan/subscription system; model export as a versioned entitlement/add-on, not a second plan catalogue.
 - Export job lifecycle: requested, queued, running, completed, failed, expired, cancelled.
-- Background worker; no long-running ZIP generation in an HTTP request.
+- Bounded background worker process; no long-running ZIP generation in an HTTP request. For initial deployment, prefer running it as a resource-limited container/process on the same VPS as API/web/database. Do not provision a separate worker VPS until measured load justifies the cost.
 - Tenant-scoped snapshot and signed tenant context in worker execution.
 - Permission check for requester, agency and download; prevent cross-tenant job-ID/ZIP access.
 - ZIP may contain documented CSV datasets and permitted attachments. Define schema/version and export manifest.
 - CSV formula-injection protection, safe filenames, archive path traversal protection and attachment malware/content handling.
 - Private encrypted object storage, short-lived download authorization, expiry and deletion policy.
 - Idempotency, request quotas, output size limits, audit trail, retries and restore/verification tests.
-- Monthly scheduling must use an explicit agency timezone and billing-cycle policy; missed runs need safe retry semantics.
+- Monthly scheduling must use an explicit agency timezone and billing-cycle policy; missed runs need safe retry semantics. Scheduling/worker processes must not require a separate server at launch and must not receive Super Admin BYPASSRLS credentials.
 - Exporting data does not itself delete it from the live database. Retention/deletion is a separate, legally reviewed policy. Never promise that M369 has no further data responsibility merely because an export was downloaded.
 
 ## 4. Human escalation

@@ -4,18 +4,18 @@
 
 ### API / PostgreSQL
 
-- Workflow: [API PostgreSQL security tests](https://github.com/Pincodenovin13/m369-support/actions/runs/42646416006)
-- Commit: `ce3d54a2df13494ee914bea2f0677dd11f736a0c`
+- Workflow: [API PostgreSQL security tests](https://github.com/Pincodenovin13/m369-support/actions/runs/42654977524)
+- Commit: `cf66a4fabbc58a27424950b0f792e3f4cbc9e686`
 - Command: `pytest -q tests`
 - PostgreSQL: 16
-- Result: **359 passed, 1 warning in 92.52s**
+- Result: **359 passed, 1 warning in 93.61s**
 - Warning: Starlette TestClient references the deprecated `anyio.abc.BlockingPortal` alias.
 - GitHub runner also warns that checkout/setup-python actions are running through the Node.js 20 compatibility path while the runner is moving to Node.js 24.
 
 ### Frontend
 
-- Workflow: [Web frontend CI](https://github.com/Pincodenovin13/m369-support/actions/runs/42628470610)
-- Commit: `455d5b2c940e07841cd6386bb397f3d08b1c7fe9`
+- Workflow: [Web frontend CI](https://github.com/Pincodenovin13/m369-support/actions/runs/42654983328)
+- Commit: `376b3b25beba303b0fef9cd5a2b77e386c194258`
 - Result: success — `npm ci`, `npm audit --audit-level=low`, `npm run type-check`, `npm run lint`, `npm run build`.
 - The active HEAD after this run contains documentation and backend test changes, not frontend source changes. A frontend run is required whenever frontend source or dependencies change.
 
@@ -75,4 +75,4 @@ npm run build
 
 - Fix the Starlette/AnyIO deprecation through a compatible dependency update and rerun the complete suite.
 - Update GitHub Actions to supported Node.js 24-compatible action versions after compatibility verification.
-- Inspect the lockfile refresh workflow separately: it currently performs automatic lockfile regeneration and `npm audit fix` before pushing to the active branch.
+- Automatic lockfile mutation workflow was removed in commit `6043cfffe0ee4642fc55c4811f6ae87c481ca9ec`; dependency updates must be explicit and reviewed. CI uses `npm ci` against the committed lockfile.

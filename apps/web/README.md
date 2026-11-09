@@ -1,69 +1,42 @@
-# M369 Support Web — Next.js Frontend
+# M369 Support Web
 
-> **Path:** `apps/web/`
-> **Runtime:** Next.js 15.1, React 19, TypeScript 5.7, Tailwind CSS 3.4.17, TanStack Query v5
-> **Parent docs:** [`/REPOSITORY_MAP.md`](../../REPOSITORY_MAP.md) · [`/STATE.md`](../../STATE.md)
+**Location:** `apps/web/`  
+**Stack:** Next.js 15, React 19, TypeScript and Tailwind CSS.
 
-The Next.js frontend for M369 Support. Provides the Agency Portal (login, dashboard, workspace list) and will host the Super Admin Console (Phase 9).
+The web app contains the agency portal and the initial Super Admin console. It is not yet feature-complete; consult root `STATE.md` for current implementation status.
 
-## Quick Start
+## Local development
 
 ```bash
 cd apps/web
-npm install
-npm run dev          # http://localhost:3000
+npm ci
+npm run dev
 ```
 
-## Scripts
+Production checks:
 
-| Script | Purpose |
-|---|---|
-| `npm run dev` | Start dev server with HMR |
-| `npm run build` | Production build |
-| `npm run start` | Start production server |
-| `npm run lint` | ESLint (`eslint src --ext .ts,.tsx`) |
-| `npm run type-check` | `tsc --noEmit` |
+```bash
+npm ci
+npm audit --audit-level=low
+npm run type-check
+npm run lint
+npm run build
+```
 
 ## Structure
 
-```
-apps/web/
-├── src/
-│   ├── app/                    # Next.js App Router pages
-│   │   ├── layout.tsx          # Root layout
-│   │   ├── page.tsx            # Landing page (/)
-│   │   ├── globals.css         # Global Tailwind styles
-│   │   ├── login/page.tsx      # Email + password + multi-agency selection
-│   │   ├── register/page.tsx   # First-agency self-registration
-│   │   └── dashboard/page.tsx  # Workspace list + agency info (auth required)
-│   ├── components/             # Reusable React components
-│   │   ├── providers.tsx       # TanStack Query provider
-│   │   └── dashboard-shell.tsx # Dashboard layout shell
-│   └── lib/                    # Frontend utilities
-│       ├── api-client.ts       # Single API client (cookie-based auth, 401 auto-refresh)
-│       └── utils.ts             # Misc utilities
-├── package.json                # Deps + scripts
-├── tsconfig.json               # TypeScript config (strict, src-layout)
-├── tailwind.config.ts          # Tailwind config
-├── postcss.config.js           # PostCSS config
-├── next.config.ts              # Next.js config
-└── .eslintrc.js                # ESLint config
-```
+- `src/app/`: App Router pages.
+- `src/components/`: shared UI components and shells.
+- `src/hooks/`: authentication and state hooks.
+- `src/lib/`: API clients and utilities.
+- `package.json` and `package-lock.json`: dependency manifest and exact lock.
 
-## Auth Flow
+CI uses `npm ci` and validates the committed lockfile. There is no automatic lockfile rewrite or `npm audit fix` push workflow. Dependency updates must be deliberate, reviewed, tested and committed together with the matching lockfile.
 
-1. **Login** (`/login`): email + password. If user belongs to multiple agencies, server returns 400 with `available_agencies` list; user selects one and resubmits.
-2. **Auth tokens**: stored in HttpOnly cookies (`access_token`, `refresh_token`).
-3. **401 handling**: `api-client.ts` auto-calls `/auth/refresh` on 401 (except for login/register/logout/refresh) and retries the original request once.
-4. **Dashboard** (`/dashboard`): fetches `/auth/me`, `/agencies/current`, `/workspaces`. On 401, redirects to `/login`.
+## API contract
 
-## Verification Status
+Do not invent frontend payloads or mock production records. Align screens to the backend route/schema or a generated OpenAPI contract. Add contract tests and frontend browser tests as those flows are implemented.
 
-| Check | Status |
-|---|---|
-| `npm run type-check` (`tsc --noEmit`) | ✅ GitHub Actions PASS (2026-11-09) |
-| `npm run lint` (`eslint src --ext .ts,.tsx`) | ✅ GitHub Actions PASS (2026-11-09) |
-| `npm run build` (`next build`) | CI-enforced on every frontend change |
-| Frontend test suite | ❌ NOT IMPLEMENTED — Phase 1 has no frontend tests |
+## Verification
 
-See `/STATE.md` for the full verification status with strict labels.
+See `docs/development/testing.md` and root `STATE.md`. Frontend type-check, lint and build passing does not mean all screens or user journeys are complete.

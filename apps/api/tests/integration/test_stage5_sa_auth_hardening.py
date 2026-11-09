@@ -416,7 +416,11 @@ def test_10_redis_error_does_not_fail_open(client: TestClient, setup_session: Se
 # ---------------------------------------------------------------------------
 
 
-def _setup_mfa_for_admin(client: TestClient, token: str) -> tuple[str, list[str]]:
+def _setup_mfa_for_admin(
+    client: TestClient,
+    token: str,
+    password: str = "super-admin-password-123",
+) -> tuple[str, list[str]]:
     """Helper: call /mfa/setup then /mfa/enable. Returns (secret, recovery_codes)."""
     r1 = client.post("/api/v1/super-admin/auth/mfa/setup", headers=_h(token))
     assert r1.status_code == 200, r1.text
@@ -428,7 +432,7 @@ def _setup_mfa_for_admin(client: TestClient, token: str) -> tuple[str, list[str]
     r2 = client.post(
         "/api/v1/super-admin/auth/mfa/enable",
         headers=_h(token),
-        json={"secret": secret, "code": code},
+        json={"password": password, "secret": secret, "code": code},
     )
     assert r2.status_code == 200, r2.text
     recovery_codes = r2.json()["recovery_codes"]
@@ -499,7 +503,7 @@ def test_11_mfa_enabled_no_full_jwt_without_code(client: TestClient, setup_sessi
     assert token is not None
 
     # Enable MFA
-    _secret, _codes = _setup_mfa_for_admin(client, token)
+    _secret, _codes = _setup_mfa_for_admin(client, token, password="correct-password-123")
 
     # Logout (clears cookie)
     client.post("/api/v1/super-admin/auth/logout", headers=_h(token))
@@ -526,7 +530,7 @@ def test_12_invalid_totp_rejected(client: TestClient, setup_session: Session):
         json={"email": admin.email, "password": "correct-password-123"},
     )
     token = r_login.cookies.get("super_admin_access_token")
-    _setup_mfa_for_admin(client, token)
+    _setup_mfa_for_admin(client, token, password="correct-password-123")
     client.post("/api/v1/super-admin/auth/logout", headers=_h(token))
 
     # Trigger MFA challenge
@@ -553,7 +557,7 @@ def test_13_totp_code_cannot_be_replayed(client: TestClient, setup_session: Sess
         json={"email": admin.email, "password": "correct-password-123"},
     )
     token = r_login.cookies.get("super_admin_access_token")
-    secret, _codes = _setup_mfa_for_admin(client, token)
+    secret, _codes = _setup_mfa_for_admin(client, token, password="correct-password-123")
     client.post("/api/v1/super-admin/auth/logout", headers=_h(token))
 
     # Get MFA challenge
@@ -598,7 +602,7 @@ def test_14_mfa_secret_not_in_response_or_log(client: TestClient, setup_session:
         json={"email": admin.email, "password": "correct-password-123"},
     )
     token = r_login.cookies.get("super_admin_access_token")
-    secret, _codes = _setup_mfa_for_admin(client, token)
+    secret, _codes = _setup_mfa_for_admin(client, token, password="correct-password-123")
 
     # Enrollment revokes the pre-MFA token; complete a fresh MFA login.
     login_response = client.post(
@@ -641,7 +645,7 @@ def test_mfa_recovery_code_works_and_single_use(client: TestClient, setup_sessio
         json={"email": admin.email, "password": "correct-password-123"},
     )
     token = r_login.cookies.get("super_admin_access_token")
-    _secret, recovery_codes = _setup_mfa_for_admin(client, token)
+    _secret, recovery_codes = _setup_mfa_for_admin(client, token, password="correct-password-123")
     client.post("/api/v1/super-admin/auth/logout", headers=_h(token))
 
     # Use a recovery code to log in
@@ -686,7 +690,7 @@ def test_mfa_challenge_token_cannot_access_management_endpoints(client: TestClie
         json={"email": admin.email, "password": "correct-password-123"},
     )
     token = r_login.cookies.get("super_admin_access_token")
-    _setup_mfa_for_admin(client, token)
+    _setup_mfa_for_admin(client, token, password="correct-password-123")
     client.post("/api/v1/super-admin/auth/logout", headers=_h(token))
 
     # Get MFA challenge
