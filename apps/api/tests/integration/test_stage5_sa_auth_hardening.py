@@ -740,107 +740,43 @@ def test_17_previous_tests_still_pass_smoke(client: TestClient, setup_session: S
 # ---------------------------------------------------------------------------
 
 
-def test_migration_0010_upgrade_then_downgrade_roundtrip():
-    """Migration 0010 must be cleanly reversible.
-
-    Runs alembic downgrade -1 (0010 → 0009), confirming the new columns +
-    tables are dropped without errors, then re-upgrades to restore head.
-    """
+def test_migration_0010_is_preserved_and_unsafe_head_downgrade_is_refused():
+    """Historical MFA migration remains applied; signed-RLS downgrade is fail-closed."""
     import os
     import subprocess
     from pathlib import Path
 
     api_dir = Path(__file__).resolve().parents[2]
-    SETUP_DB_URL = "postgresql+psycopg://postgres@localhost:5432/m369_support_test"
+    db_url = "postgresql+psycopg://postgres@localhost:5432/m369_support_test"
+    env = {**os.environ, "DATABASE_URL": db_url}
 
-    # First, ensure we're at head (upgrade to head is idempotent)
-    r0 = subprocess.run(
-        ["alembic", "upgrade", "head"],
-        cwd=str(api_dir),
-        capture_output=True,
-        text=True,
-        env={**os.environ, "DATABASE_URL": SETUP_DB_URL},
-    )
-    assert r0.returncode == 0, f"upgrade to head failed: {r0.stderr}"
+    upgrade = subprocess.run(["alembic", "upgrade", "head"], cwd=str(api_dir),
+                             capture_output=True, text=True, env=env)
+    assert upgrade.returncode == 0, f"upgrade to head failed: {upgrade.stderr}"
 
-    # Verify the MFA tables exist before downgrade
-    conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public' "
-                "AND tablename IN ('super_admin_mfa_challenges','super_admin_used_totp_codes','super_admin_mfa_recovery_codes')"
-            )
-            assert cur.fetchone()[0] == 3, "MFA tables missing before downgrade"
-    finally:
-        conn.close()
-
-    # Downgrade TWO steps → 0009 (past 0010 which has MFA tables)
-    # After Package B (migration 0011), head is 0011. Downgrade -1 → 0010
-    # (MFA tables still exist). Downgrade -2 → 0009 (MFA tables gone).
-    r2 = subprocess.run(
+    downgrade = subprocess.run(
         ["alembic", "downgrade", "0009_widen_paid_currency"],
-        cwd=str(api_dir),
-        capture_output=True,
-        text=True,
-        env={**os.environ, "DATABASE_URL": SETUP_DB_URL},
+        cwd=str(api_dir), capture_output=True, text=True, env=env,
     )
-    assert r2.returncode == 0, f"downgrade failed: {r2.stderr}"
+    assert downgrade.returncode != 0, "unsafe downgrade to unsigned tenant policies succeeded"
+    assert "Unsafe downgrade refused" in downgrade.stderr
 
-    # Verify the new tables are gone
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
         with conn.cursor() as cur:
+            cur.execute("SELECT version_num FROM alembic_version")
+            assert cur.fetchone()[0] == "0019_signed_tenant_context_rls"
             cur.execute(
                 "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public' "
                 "AND tablename IN ('super_admin_mfa_challenges','super_admin_used_totp_codes','super_admin_mfa_recovery_codes')"
             )
-            assert cur.fetchone()[0] == 0, "MFA tables still exist after downgrade"
-
-            # Verify the new columns are gone from super_admins
-            cur.execute(
-                "SELECT COUNT(*) FROM information_schema.columns "
-                "WHERE table_name='super_admins' AND column_name IN ('token_version','failed_login_attempts','last_failed_login_at')"
-            )
-            assert cur.fetchone()[0] == 0, "new columns still exist after downgrade"
-
-            # Verify alembic_version is now at 0009
-            cur.execute("SELECT version_num FROM alembic_version")
-            v = cur.fetchone()
-            assert v is not None and v[0] == "0009_widen_paid_currency", (
-                f"alembic_version after downgrade: {v}"
-            )
+            assert cur.fetchone()[0] == 3, "MFA tables were removed by refused downgrade"
     finally:
         conn.close()
 
-    # Re-upgrade to restore the head state for subsequent tests
-    r3 = subprocess.run(
-        ["alembic", "upgrade", "head"],
-        cwd=str(api_dir),
-        capture_output=True,
-        text=True,
-        env={**os.environ, "DATABASE_URL": SETUP_DB_URL},
-    )
-    assert r3.returncode == 0, f"re-upgrade failed: {r3.stderr}"
-
-    # Dispose ALL engine connection pools — the schema was dropped + recreated
-    # during this test, so existing pooled connections are stale.
-    from app.db.database import engine, super_admin_engine, super_admin_auth_engine
-    engine.dispose()
-    super_admin_engine.dispose()
-    super_admin_auth_engine.dispose()
-
-    # Verify we're back at 0010
-    conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT version_num FROM alembic_version")
-            v = cur.fetchone()
-            assert v is not None and v[0] == "0016_extend_login_helper_with_agency_name", (
-                f"alembic_version after re-upgrade: {v}"
-            )
-    finally:
-        conn.close()
+    reupgrade = subprocess.run(["alembic", "upgrade", "head"], cwd=str(api_dir),
+                               capture_output=True, text=True, env=env)
+    assert reupgrade.returncode == 0, f"idempotent re-upgrade failed: {reupgrade.stderr}"
 
 
 def test_migration_0010_preserves_existing_super_admin_data(setup_session: Session):
