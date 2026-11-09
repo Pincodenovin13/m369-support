@@ -7,6 +7,7 @@ This directory contains security documentation for the M369 Support platform.
 ## Documents
 
 - [Agency Session Revocation](./agency-session-revocation.md) — How token_version enables server-side logout for agency users.
+- [Phase 1 Security Closure](./phase1-security-closure-2026-11-09.md) — Passing CI evidence, tested security controls, closure checklist, and production limitations.
 
 ## Security Architecture Summary
 
@@ -24,7 +25,7 @@ Both agency users (`users.token_version`) and Super Admins (`super_admins.token_
 
 ### RLS Coverage
 
-16 tenant-owned tables have RLS ENABLE + FORCE. The `agency_notes` table has a `USING(false)` policy making it platform-private. `m369_app` has no access to Super Admin tables (revoked in migration 0012).
+16 tenant-owned tables have RLS ENABLE + FORCE. The `agency_notes` table has a `USING(false)` policy making it platform-private. A PostgreSQL catalog-driven CI guard discovers public tables with `agency_id` and rejects missing or unexpected RLS policies. The `agencies` root table is separately checked because its tenant key is `id`. `m369_app` has no access to Super Admin tables (revoked in migration 0012).
 
 ### Registration Guard
 
