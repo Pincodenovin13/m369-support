@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-11-09 — tenant-isolation review and two corrective migrations
 > **Canonical development branch:** `phase-1/foundation`
-> **Current working branch:** `refactor/repository-structure-unification` (HEAD: `896bc3d684c39c0ae588b89c49494c19fb79c73c`)
+> **Current working branch:** `refactor/repository-structure-unification` (HEAD: `39a480f6a8db4eec3ab0e4d5f5d5b8d45225c647`)
 > **Recovery branch:** `recovery/zai-workspace-2026-11-08` (HEAD: `1c3294154b41e051855613416f0bc68c3901d125`)
 > **Tracked files:** 179 (was 168 at start of this task)
 > **Migration head (filesystem):** `0018_workspace_agency_fks_contacts_teams` (18 migrations, linear chain)
