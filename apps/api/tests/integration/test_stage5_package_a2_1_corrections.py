@@ -58,8 +58,10 @@ def test_A2_1_01b_fakeredis_in_dev_requirements():
     req_dev_path = Path(__file__).resolve().parents[2] / "requirements-dev.txt"
     assert req_dev_path.exists(), "requirements-dev.txt does not exist"
     content = req_dev_path.read_text()
-    assert "fakeredis==2.34.1" in content, (
-        "A2.1-01b FAIL: fakeredis==2.34.1 not found in requirements-dev.txt"
+    # The Lua extra is required by fakeredis rate-limit scripts in CI.
+    # Check the complete pinned requirement, including its optional extra.
+    assert "fakeredis[lua]==2.34.1" in content, (
+        "A2.1-01b FAIL: fakeredis[lua]==2.34.1 not found in requirements-dev.txt"
     )
 
 
