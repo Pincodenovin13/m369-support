@@ -87,7 +87,7 @@ export interface PaymentOut {
   amount_paid: number;
   currency: string;
   paid_currency: string | null;
-  paid_amount_raw: number | null;
+  paid_amount_raw: string | null;
   paid_amount_decimals: number | null;
   exchange_rate: number | null;
   status: string;
@@ -174,6 +174,14 @@ function query(params?: Record<string, string | number | boolean | undefined>): 
   }
   const encoded = values.toString();
   return encoded ? `?${encoded}` : "";
+}
+
+function stringifyExact(value: unknown): string {
+  const marker = "__M369_BIGINT__";
+  const serialized = JSON.stringify(value, (_key, item) =>
+    typeof item === "bigint" ? `${marker}${item.toString()}` : item,
+  );
+  return serialized.replace(/"__M369_BIGINT__(-?\\d+)"/g, "$1");
 }
 
 export const superAdminAuthApi = {
@@ -263,13 +271,13 @@ export const superAdminApi = {
     verify(paymentId: string, input: {
       amount_paid: number;
       paid_currency?: string | null;
-      paid_amount_raw?: number | null;
+      paid_amount_raw?: number | bigint | null;
       paid_amount_decimals?: number | null;
       exchange_rate?: number | null;
       network?: string | null;
       note?: string | null;
     }): Promise<PaymentOut> {
-      return request(`/payments/${paymentId}/verify`, { method: "POST", body: JSON.stringify(input) });
+      return request(`/payments/${paymentId}/verify`, { method: "POST", body: stringifyExact(input) });
     },
     reject(paymentId: string, failure_reason: string): Promise<PaymentOut> {
       return request(`/payments/${paymentId}/reject`, { method: "POST", body: JSON.stringify({ failure_reason }) });
