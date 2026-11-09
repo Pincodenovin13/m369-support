@@ -34,13 +34,38 @@ Build the Agency Portal and Super Admin Console in parallel with backend hardeni
 
 ## Frontend foundation CI evidence — 2026-11-09
 
-- Tested commit: `a6e3f13eaee2b3c0029accbe43e6fe108e76669e`
-- Workflow: [Web frontend CI](https://github.com/Pincodenovin13/m369-support/actions/runs/42615796288)
-- Result: **success** — dependency install, dependency audit, TypeScript, ESLint, and production build all passed.
+- Tested commit: `71e6b993caf7854673ef2b7d3d758390c2b5abbb`
+- Workflow: [Web frontend CI](https://github.com/Pincodenovin13/m369-support/actions/runs/42616717487)
+- Result: **success** — dependency install, dependency audit, TypeScript, ESLint, and production build all passed, including the initial Super Admin console routes.
 - Dependency audit: **0 vulnerabilities** after updating the pinned manifest and regenerating the lockfile.
 - Lockfile commit: `cb9a74bd95f5` (`chore(web): refresh dependency lockfile`).
 - Verified stack: Next.js 15.5.29, React 19.0.1, PostCSS 8.5.32, Node.js 20.20.2 in CI.
 - The current frontend still has no browser-level end-to-end test suite. The production build passing does not prove every user workflow works against a deployed API.
+
+
+## Frontend scope now present
+
+### Agency workspace
+
+- Responsive agency shell with separate navigation, user identity, and sign-out.
+- Public landing, agency sign-in, and agency registration screens.
+- Agency overview, contacts, conversations, conversation detail, teams, channels, canned responses, and Knowledge Base screens.
+- First API contract mismatches corrected for contacts, teams, messages, canned responses, and Knowledge Base.
+
+### Super Admin console
+
+- Separate `/super-admin/login` flow with password login and MFA challenge/recovery-code verification.
+- Separate Super Admin API client and session hook. It uses only the HttpOnly `super_admin_access_token` cookie; it does not reuse agency refresh logic or store tokens in browser storage.
+- Protected console layout and separate responsive shell.
+- Initial pages for platform overview, agency directory with suspend/activate controls, plan management, subscription lifecycle review, and manual payment verification/rejection.
+
+### Still required before product completion
+
+- Browser-level end-to-end tests for agency and Super Admin critical paths.
+- Manual responsive/accessibility review on real mobile and desktop devices.
+- Automated OpenAPI-to-TypeScript drift checking.
+- Agency resource create/edit flows and Super Admin settings, audit-log, and agency-note screens.
+- Production deployment verification, real Redis, ingress/proxy validation, and an independent authorization/IDOR review.
 
 ## Integration defects found and corrected in the first frontend slice
 
