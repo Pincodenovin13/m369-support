@@ -261,6 +261,11 @@ def verify_mfa(
     except (KeyError, ValueError):
         raise HTTPException(status_code=401, detail="Malformed MFA challenge") from None
 
+    # Exactly one second factor is required. Validate before consuming the
+    # challenge so malformed requests do not leave ambiguous challenge state.
+    if bool(payload.code) == bool(payload.recovery_code):
+        raise HTTPException(status_code=400, detail="Supply exactly one of code or recovery_code")
+
     # Rate limit (per-IP + per-super_admin_id, independent from login limit)
     check_verify_mfa_rate_limit(request, sa_id)
 
@@ -353,13 +358,12 @@ def logout(
     """Logout — bumps token_version so all previously-issued tokens are invalidated."""
     sa_id: uuid.UUID = request.state.super_admin_id
     admin = db.get(SuperAdmin, sa_id)
-    if admin is None:
-        response.delete_cookie("super_admin_access_token", path="/")
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-    sa_auth.bump_token_version(db, admin=admin, reason="logout", ip=_ip(request))
-    db.commit()
+    if admin is not None:
+        sa_auth.bump_token_version(db, admin=admin, reason="logout", ip=_ip(request))
+        db.commit()
     response.delete_cookie("super_admin_access_token", path="/")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -430,6 +434,10 @@ def mfa_enable(
         raise HTTPException(status_code=401, detail="Super Admin not found")
     if admin.mfa_enabled:
         raise HTTPException(status_code=409, detail="MFA is already enabled")
+    # Require fresh knowledge-factor proof as well as the existing session.
+    # A stolen access token alone must not enroll an attacker-controlled TOTP device.
+    if not verify_password(payload.password, admin.password_hash):
+        raise HTTPException(status_code=401, detail="Password confirmation failed")
     # A stolen authenticated session must not be able to brute-force the
     # six-digit enrollment proof. Share the dedicated MFA IP/account quota.
     check_verify_mfa_rate_limit(request, sa_id)
@@ -443,6 +451,9 @@ def mfa_enable(
         secret_plaintext=payload.secret,
         ip=_ip(request),
     )
+    # Enabling MFA invalidates every session issued before MFA enrollment.
+    # The administrator must sign in again and complete the MFA challenge.
+    sa_auth.bump_token_version(db, admin=admin, reason="mfa_enabled", ip=_ip(request))
     db.commit()
     return SuperAdminRecoveryCodesOut(recovery_codes=recovery_codes)
 
@@ -461,7 +472,9 @@ def mfa_disable(
         raise HTTPException(status_code=401, detail="Super Admin not found")
     if not admin.mfa_enabled:
         raise HTTPException(status_code=409, detail="MFA is not enabled")
-    # Require throttling for TOTP and recovery-code checks on MFA disable too.
+    # Require exactly one factor and throttle every disable attempt.
+    if bool(payload.code) == bool(payload.recovery_code):
+        raise HTTPException(status_code=400, detail="Supply exactly one of code or recovery_code")
     check_verify_mfa_rate_limit(request, sa_id)
     if payload.recovery_code:
         sa_auth.consume_recovery_code(db, admin=admin, code=payload.recovery_code, ip=_ip(request))
@@ -470,6 +483,8 @@ def mfa_disable(
     else:
         raise HTTPException(status_code=400, detail="Must supply either code or recovery_code")
     sa_auth.disable_mfa_for_admin(db, admin=admin, ip=_ip(request))
+    # Disabling MFA also revokes all existing sessions; a fresh login is required.
+    sa_auth.bump_token_version(db, admin=admin, reason="mfa_disabled", ip=_ip(request))
     db.commit()
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie("super_admin_access_token", path="/")
