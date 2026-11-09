@@ -27,11 +27,31 @@ def upgrade() -> None:
     if extension_schema != "public":
         op.execute("ALTER EXTENSION pgcrypto SET SCHEMA public")
     op.execute("""
-      DO $$ BEGIN
+      DO $ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='m369_tenant_context') THEN
           CREATE ROLE m369_tenant_context NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION NOINHERIT;
         END IF;
-      END $$;
+      END $;
+    """)
+    # Enforce the verifier owner role's attributes even if it pre-existed.
+    op.execute("ALTER ROLE m369_tenant_context NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION NOINHERIT")
+    # A stale membership in either direction could make SET ROLE or inherited
+    # privileges possible. Remove every membership involving this role.
+    op.execute("""
+      DO $
+      DECLARE m record;
+      BEGIN
+        FOR m IN
+          SELECT parent.rolname AS granted_role, member.rolname AS member_role
+          FROM pg_auth_members am
+          JOIN pg_roles parent ON parent.oid = am.roleid
+          JOIN pg_roles member ON member.oid = am.member
+          WHERE parent.rolname = 'm369_tenant_context'
+             OR member.rolname = 'm369_tenant_context'
+        LOOP
+          EXECUTE format('REVOKE %I FROM %I', m.granted_role, m.member_role);
+        END LOOP;
+      END $;
     """)
     op.execute("CREATE SCHEMA m369_private AUTHORIZATION postgres")
     op.execute("REVOKE ALL ON SCHEMA m369_private FROM PUBLIC, m369_app")
@@ -82,6 +102,28 @@ def upgrade() -> None:
     # Keep platform-private notes policy deny-all, explicitly confirm it remains.
     op.execute("DROP POLICY IF EXISTS agency_notes_platform_private ON public.agency_notes")
     op.execute("CREATE POLICY agency_notes_platform_private ON public.agency_notes USING(false) WITH CHECK(false)")
+    # Fail migration if an unexpected permissive policy could OR-bypass RLS.
+    op.execute("""
+      DO $
+      DECLARE t text; policy_count integer;
+      BEGIN
+        FOREACH t IN ARRAY ARRAY[
+          'agencies','workspaces','agency_memberships','teams','team_memberships',
+          'contacts','conversations','audit_logs','subscriptions','message_attachments',
+          'channels','kb_categories','kb_articles','canned_responses','payments','messages',
+          'agency_notes'
+        ] LOOP
+          SELECT count(*) INTO policy_count
+          FROM pg_policy p
+          JOIN pg_class c ON c.oid=p.polrelid
+          JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE n.nspname='public' AND c.relname=t;
+          IF policy_count <> 1 THEN
+            RAISE EXCEPTION 'RLS policy invariant failed for %. Expected exactly one policy, found %', t, policy_count;
+          END IF;
+        END LOOP;
+      END $;
+    """)
     op.execute("REVOKE CREATE ON SCHEMA public FROM m369_app")
 
 def downgrade() -> None:
