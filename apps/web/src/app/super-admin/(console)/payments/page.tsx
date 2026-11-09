@@ -7,6 +7,53 @@ import { superAdminApi, type PaymentOut } from "@/lib/super-admin-api-client";
 
 const PAYMENT_STATUSES = ["pending", "verifying", "verified", "rejected", "expired"];
 
+function decimalToInteger(value: string, scale: number): bigint {
+  const match = /^(\\d+)(?:\\.(\\d*))?$/.exec(value.trim());
+  if (!match) throw new Error("Enter a valid non-negative decimal amount.");
+  const whole = match[1];
+  const fraction = match[2] ?? "";
+  if (fraction.length > scale) {
+    throw new Error(`This value supports at most ${scale} decimal places.`);
+  }
+  const multiplier = BigInt(10) ** BigInt(scale);
+  return BigInt(whole) * multiplier + BigInt(fraction.padEnd(scale, "0") || "0");
+}
+
+function calculatePaymentAmounts(tokenAmount: string, decimalsValue: string, rateValue: string) {
+  const decimals = Number(decimalsValue);
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) {
+    throw new Error("Token decimals must be a whole number from 0 to 18.");
+  }
+  const raw = decimalToInteger(tokenAmount, decimals);
+  if (raw <= BigInt(0) || raw.toString().length > 78) {
+    throw new Error("Raw token amount must fit the supported uint256 precision.");
+  }
+  const rateScaled = decimalToInteger(rateValue, 6);
+  if (rateScaled <= BigInt(0)) throw new Error("Exchange rate must be greater than zero.");
+  const denominator = (BigInt(10) ** BigInt(decimals)) * BigInt(1000000);
+  const numerator = raw * rateScaled * BigInt(100);
+  const baseCents = (numerator + denominator / BigInt(2)) / denominator;
+  if (baseCents < BigInt(0) || baseCents > BigInt(2147483647)) {
+    throw new Error("Converted base amount exceeds the database INTEGER limit.");
+  }
+  return {
+    raw,
+    baseCents: Number(baseCents),
+    exchangeRate: Number(rateScaled) / 1000000,
+  };
+}
+
+function previewBaseAmount(tokenAmount: string, decimals: string, rate: string, currency: string): string {
+  if (!tokenAmount || !decimals || !rate) return "—";
+  try {
+    const calculated = calculatePaymentAmounts(tokenAmount, decimals, rate);
+    return `${(calculated.baseCents / 100).toFixed(2)} ${currency}`;
+  } catch {
+    return "Invalid amount or rate";
+  }
+}
+
+
 export default function SuperAdminPaymentsPage() {
   const [items, setItems] = useState<PaymentOut[]>([]);
   const [filter, setFilter] = useState("pending");
@@ -71,24 +118,14 @@ export default function SuperAdminPaymentsPage() {
         if (!form.failureReason.trim()) throw new Error("Enter a reason for rejecting this payment.");
         await superAdminApi.payments.reject(activePayment, form.failureReason.trim());
       } else {
-        const tokenAmount = Number(form.tokenAmount);
-        const decimals = Number(form.decimals);
-        const rate = Number(form.exchangeRate);
-        if (!Number.isFinite(tokenAmount) || tokenAmount <= 0) throw new Error("Enter the received token amount.");
-        if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) throw new Error("Token decimals must be a whole number from 0 to 18.");
-        if (!Number.isFinite(rate) || rate <= 0) throw new Error("Enter a valid base-currency exchange rate.");
-        const raw = Math.round(tokenAmount * 10 ** decimals);
-        const baseCents = Math.round(tokenAmount * rate * 100);
-        if (!Number.isSafeInteger(raw) || !Number.isSafeInteger(baseCents) || baseCents < 0) {
-          throw new Error("Calculated amount is outside the safe numeric range.");
-        }
+        const calculated = calculatePaymentAmounts(form.tokenAmount, form.decimals, form.exchangeRate);
         await superAdminApi.payments.verify(activePayment, {
-          amount_paid: baseCents,
+          amount_paid: calculated.baseCents,
           paid_currency: form.paidCurrency.trim().toUpperCase(),
-          paid_amount_raw: raw,
-          paid_amount_decimals: decimals,
-          exchange_rate: rate,
-          network: form.network.trim().toUpperCase(),
+          paid_amount_raw: calculated.raw,
+          paid_amount_decimals: Number(form.decimals),
+          exchange_rate: calculated.exchangeRate,
+          network: form.network.trim().toUpperCase() || undefined,
           note: form.note.trim() || undefined,
         });
       }
@@ -190,7 +227,7 @@ export default function SuperAdminPaymentsPage() {
                             </label>
                           </div>
                           <div className="mt-3 text-[10px] text-slate-500">
-                            Calculated base amount: {form.tokenAmount && form.exchangeRate && Number.isFinite(Number(form.tokenAmount) * Number(form.exchangeRate)) ? (Number(form.tokenAmount) * Number(form.exchangeRate)).toFixed(2) + " " + payment.currency : "—"}
+                            Calculated base amount (cents): {previewBaseAmount(form.tokenAmount, form.decimals, form.exchangeRate, payment.currency)}
                           </div>
                         </>
                       ) : (
