@@ -354,7 +354,7 @@ def test_B1_10_real_mfa_via_sa_auth(client, setup_session, monkeypatch):
     code = totp.now()
     r_enable = client.post("/api/v1/super-admin/auth/mfa/enable",
                             headers={"Authorization": f"Bearer {token}"},
-                            json={"secret": secret, "code": code})
+                            json={"secret": secret, "code": code, "password": "super-admin-password-123"})
     assert r_enable.status_code == 200, f"MFA enable failed: {r_enable.text}"
 
     # Logout
