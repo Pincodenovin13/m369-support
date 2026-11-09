@@ -1,7 +1,7 @@
 # M369 Support Web — Next.js Frontend
 
 > **Path:** `apps/web/`
-> **Runtime:** Next.js 15.1, React 19, TypeScript 5.7, Tailwind CSS 4, TanStack Query v5
+> **Runtime:** Next.js 15.1, React 19, TypeScript 5.7, Tailwind CSS 3.4.17, TanStack Query v5
 > **Parent docs:** [`/REPOSITORY_MAP.md`](../../REPOSITORY_MAP.md) · [`/STATE.md`](../../STATE.md)
 
 The Next.js frontend for M369 Support. Provides the Agency Portal (login, dashboard, workspace list) and will host the Super Admin Console (Phase 9).
@@ -21,7 +21,7 @@ npm run dev          # http://localhost:3000
 | `npm run dev` | Start dev server with HMR |
 | `npm run build` | Production build |
 | `npm run start` | Start production server |
-| `npm run lint` | ESLint |
+| `npm run lint` | ESLint (`eslint src --ext .ts,.tsx`) |
 | `npm run type-check` | `tsc --noEmit` |
 
 ## Structure
@@ -63,7 +63,7 @@ apps/web/
 |---|---|
 | `npm run type-check` (`tsc --noEmit`) | ✅ Independently verified PASS (2026-11-08) |
 | `npm run lint` (`next lint`) | Z.ai-reported PASS, not independently verified |
-| `npm run build` (`next build`) | Z.ai-reported PASS, not independently verified |
+| `npm run build` (`next build`) | CI-enforced on every frontend change |
 | Frontend test suite | ❌ NOT IMPLEMENTED — Phase 1 has no frontend tests |
 
 See `/STATE.md` for the full verification status with strict labels.
