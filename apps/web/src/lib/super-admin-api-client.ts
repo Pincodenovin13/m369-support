@@ -181,7 +181,7 @@ function stringifyExact(value: unknown): string {
   const serialized = JSON.stringify(value, (_key, item) =>
     typeof item === "bigint" ? `${marker}${item.toString()}` : item,
   );
-  return serialized.replace(/"__M369_BIGINT__(-?\\d+)"/g, "$1");
+  return serialized.replace(/"__M369_BIGINT__(-?\d+)"/g, "$1");
 }
 
 export const superAdminAuthApi = {
