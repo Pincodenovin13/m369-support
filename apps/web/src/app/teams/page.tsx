@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { Loading, ErrorState, EmptyState, PageHeader } from "@/components/ui";
@@ -12,38 +12,44 @@ export default function TeamsPage() {
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [membersByTeam, setMembersByTeam] = useState<Record<string, TeamMembershipOut[]>>({});
+  const [memberErrors, setMemberErrors] = useState<Record<string, string>>({});
   const [showCreate, setShowCreate] = useState(false);
   const [newTeamName, setNewTeamName] = useState("");
   const [creating, setCreating] = useState(false);
 
-  async function loadTeams() {
+  const loadTeams = useCallback(async () => {
     if (!user) return;
     setListLoading(true);
+    setListError(null);
     try {
       const res = await teamApi.list({ limit: 50 });
       const items = (res as PaginatedResponse<TeamOut>).items;
       setTeams(items);
       const memberMap: Record<string, TeamMembershipOut[]> = {};
+      const errorMap: Record<string, string> = {};
       await Promise.all(
-        items.map(async (t) => {
+        items.map(async (team) => {
           try {
-            memberMap[t.id] = await teamApi.listMembers(t.id);
-          } catch {
-            memberMap[t.id] = [];
+            memberMap[team.id] = await teamApi.listMembers(team.id);
+          } catch (err) {
+            memberMap[team.id] = [];
+            errorMap[team.id] =
+              err instanceof Error ? err.message : "Unable to load team members";
           }
         })
       );
       setMembersByTeam(memberMap);
+      setMemberErrors(errorMap);
     } catch (err) {
       setListError(err instanceof Error ? err.message : "Failed to load teams");
     } finally {
       setListLoading(false);
     }
-  }
+  }, [user]);
 
   useEffect(() => {
     void loadTeams();
-  }, [user]);
+  }, [loadTeams]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -120,8 +126,15 @@ export default function TeamsPage() {
                       )}
                     </div>
                     <div className="text-xs text-gray-500">
-                      {membersByTeam[t.id]?.length || 0} member(s)
+                      {memberErrors[t.id]
+                        ? "Member list unavailable"
+                        : `${membersByTeam[t.id]?.length || 0} member(s)`}
                     </div>
+                    {memberErrors[t.id] && (
+                      <div className="mt-1 text-xs text-red-600" role="alert">
+                        {memberErrors[t.id]}
+                      </div>
+                    )}
                   </div>
                   <span className="text-xs text-gray-400">
                     Created {new Date(t.created_at).toLocaleDateString()}
