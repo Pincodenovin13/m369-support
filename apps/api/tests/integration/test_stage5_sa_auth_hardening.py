@@ -795,7 +795,7 @@ def test_migration_0010_is_preserved_and_unsafe_head_downgrade_is_refused():
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
-            assert cur.fetchone()[0] == "0019_signed_tenant_context_rls"
+            assert cur.fetchone()[0] == "0020_payment_raw_amount_precision"
             cur.execute(
                 "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public' "
                 "AND tablename IN ('super_admin_mfa_challenges','super_admin_used_totp_codes','super_admin_mfa_recovery_codes')"
