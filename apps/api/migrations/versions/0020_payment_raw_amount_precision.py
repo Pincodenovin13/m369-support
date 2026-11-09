@@ -34,7 +34,8 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_payments_raw_amount_nonneg",
         "payments",
-        "paid_amount_raw IS NULL OR paid_amount_raw >= 0",
+        "paid_amount_raw IS NULL OR (paid_amount_raw >= 0 AND "
+        "paid_amount_raw <= 115792089237316195423570985008687907853269984665640564039457584007913129639935)",
     )
 
 
