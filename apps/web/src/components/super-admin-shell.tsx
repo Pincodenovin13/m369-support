@@ -136,6 +136,14 @@ export function SuperAdminShell({
               <div className="flex h-9 w-9 items-center justify-center rounded-full border border-orange-100 bg-orange-50 text-xs font-bold text-brand-700">
                 {initials(admin.name)}
               </div>
+              <button
+                type="button"
+                onClick={logout}
+                disabled={logoutLoading}
+                className="rounded-lg border border-slate-200 px-2.5 py-2 text-[10px] font-bold text-slate-500 hover:bg-slate-50 disabled:opacity-50 lg:hidden"
+              >
+                {logoutLoading ? "…" : "Sign out"}
+              </button>
             </div>
           </div>
         </header>
