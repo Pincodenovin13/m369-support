@@ -95,7 +95,6 @@ See [`docs/README.md`](./docs/README.md) for the full documentation index. Key d
 | Local Setup | [`docs/development/local-setup.md`](./docs/development/local-setup.md) | Step-by-step development environment setup |
 | Environment Variables | [`docs/development/environment.md`](./docs/development/environment.md) | All env vars with descriptions |
 | Testing | [`docs/development/testing.md`](./docs/development/testing.md) | Test architecture, how to run, verification status |
-| Production Operations | [`docs/deployment/production-operations.md`](./docs/deployment/production-operations.md) | VPS, domain, DNS, HTTPS, backups, updates, rollback and cost control |
 
 ## Tech Stack
 

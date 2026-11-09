@@ -11,9 +11,7 @@
 > - For current file map: see [`/REPOSITORY_MAP.md`](../../REPOSITORY_MAP.md)
 > - For current development rules: see [`/CONTRIBUTING.md`](../../CONTRIBUTING.md)
 >
-> The file `legacy-CONTRIBUTING-zai-2026-11-09.md` preserves the old Z.ai-specific contributor policy for provenance. The active policy is the root `CONTRIBUTING.md`.
-
-**Do NOT use files in this folder as implementation references.** They may
+> **Do NOT use files in this folder as implementation references.** They may
 > contain outdated architecture, superseded designs, or references to
 > external products that must never be used as M369 sources.
 
@@ -30,12 +28,11 @@
 | Preservation folder commit | `2518c85` |
 | Missing-patches fix commit | `1c32941` |
 
-## Structure (17 files total)
+## Structure (16 files total)
 
 ```
 recovery/workspace-preservation/
 ├── README.md                                  ← THIS FILE (historical archive notice)
-├── legacy-CONTRIBUTING-zai-2026-11-09.md       ← superseded root contributor policy; archive only
 ├── patches/                                   ← 5 HISTORICAL patch files
 │   ├── 0001-Stage-2-...patch                   (commit 853b557 — already on foundation)
 │   ├── 0002-Stage-3-...patch                   (commit 70e026f — already on foundation)

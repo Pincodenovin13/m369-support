@@ -436,27 +436,53 @@ def _setup_mfa_for_admin(client: TestClient, token: str) -> tuple[str, list[str]
 
 
 def test_mfa_enrollment_and_disable_are_rate_limited(client: TestClient, setup_session: Session, monkeypatch):
-    """MFA setup proof and MFA disable must both use the dedicated MFA limiter."""
-    admin = _make_sa(setup_session)
+    """MFA enrollment/disable are throttled and each change revokes old sessions."""
+    admin = _make_sa(setup_session, password="correct-password-123")
     token = _sa_token(admin)
     seen = []
+
     def record_limit(request, sa_id):
         seen.append(sa_id)
+
     monkeypatch.setattr(
         "app.api.v1.super_admin.auth.check_verify_mfa_rate_limit",
         record_limit,
     )
     secret, _codes = _setup_mfa_for_admin(client, token)
+
+    # Enrollment must revoke the pre-MFA session.
+    stale = client.get("/api/v1/super-admin/auth/me", headers=_h(token))
+    assert stale.status_code == 401
     assert seen == [admin.id], "MFA enrollment did not invoke the account/IP limiter"
+
+    # Re-authenticate with both factors to obtain a fresh session.
+    login_response = client.post(
+        "/api/v1/super-admin/auth/login",
+        json={"email": admin.email, "password": "correct-password-123"},
+    )
+    assert login_response.status_code == 200
+    challenge = login_response.json()["mfa_challenge"]
     s = get_settings()
     code = pyotp.TOTP(secret, digits=s.totp_digits, interval=s.totp_step_seconds).now()
+    verify_response = client.post(
+        "/api/v1/super-admin/auth/login/verify-mfa",
+        json={"mfa_challenge": challenge, "code": code},
+    )
+    assert verify_response.status_code == 200, verify_response.text
+    fresh_token = verify_response.cookies.get("super_admin_access_token")
+    assert fresh_token
+
     response = client.post(
         "/api/v1/super-admin/auth/mfa/disable",
-        headers=_h(token),
+        headers=_h(fresh_token),
         json={"code": code},
     )
     assert response.status_code == 204, response.text
-    assert seen == [admin.id, admin.id], "MFA disable did not invoke the account/IP limiter"
+    assert seen == [admin.id, admin.id, admin.id], "MFA verify/disable did not invoke the account/IP limiter"
+
+    # Disabling MFA revokes the just-used session as well.
+    stale_after_disable = client.get("/api/v1/super-admin/auth/me", headers=_h(fresh_token))
+    assert stale_after_disable.status_code == 401
 def test_11_mfa_enabled_no_full_jwt_without_code(client: TestClient, setup_session: Session):
     """Test 11: If MFA is enabled, password alone does NOT issue a full JWT."""
     admin = _make_sa(setup_session, password="correct-password-123")
@@ -572,8 +598,24 @@ def test_14_mfa_secret_not_in_response_or_log(client: TestClient, setup_session:
     token = r_login.cookies.get("super_admin_access_token")
     secret, _codes = _setup_mfa_for_admin(client, token)
 
+    # Enrollment revokes the pre-MFA token; complete a fresh MFA login.
+    login_response = client.post(
+        "/api/v1/super-admin/auth/login",
+        json={"email": admin.email, "password": "correct-password-123"},
+    )
+    challenge = login_response.json()["mfa_challenge"]
+    s = get_settings()
+    code = pyotp.TOTP(secret, digits=s.totp_digits, interval=s.totp_step_seconds).now()
+    verify_response = client.post(
+        "/api/v1/super-admin/auth/login/verify-mfa",
+        json={"mfa_challenge": challenge, "code": code},
+    )
+    assert verify_response.status_code == 200, verify_response.text
+    fresh_token = verify_response.cookies.get("super_admin_access_token")
+    assert fresh_token
+
     # /me must NOT return the secret
-    r_me = client.get("/api/v1/super-admin/auth/me", headers=_h(token))
+    r_me = client.get("/api/v1/super-admin/auth/me", headers=_h(fresh_token))
     assert r_me.status_code == 200
     me_body = r_me.text
     assert secret not in me_body, "MFA secret leaked in /me response"
@@ -688,6 +730,10 @@ def test_15_logout_invalidates_session_via_token_version(client: TestClient, set
     # Logout
     r_logout = client.post("/api/v1/super-admin/auth/logout", headers=_h(token))
     assert r_logout.status_code == 204
+    set_cookie = r_logout.headers.get("set-cookie", "").lower()
+    assert "super_admin_access_token" in set_cookie and ("max-age=0" in set_cookie or "expires=" in set_cookie), (
+        "logout did not send a cookie deletion header"
+    )
 
     # Verify old token no longer works
     r_me2 = client.get("/api/v1/super-admin/auth/me", headers=_h(token))
