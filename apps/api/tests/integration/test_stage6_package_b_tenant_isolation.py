@@ -114,7 +114,7 @@ def test_B_01_migration_0011_upgrade_success():
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0016_extend_login_helper_with_agency_name", f"head is {v}, expected 0012"
+            assert v == "0019_signed_tenant_context_rls", f"head is {v}, expected signed-RLS head"
     finally:
         conn.close()
 
@@ -124,66 +124,38 @@ def test_B_01_migration_0011_upgrade_success():
 # ---------------------------------------------------------------------------
 
 
-def test_B_02_migration_0011_downgrade_upgrade_roundtrip():
-    """B-02: Migration 0011 can be downgraded and re-upgraded cleanly.
-
-    After migration 0012, head is 0012. Downgrade -1 → 0011 (message_attachments
-    agency_id still exists). Downgrade -2 → 0010 (agency_id gone, RLS gone).
-    We downgrade -2 to verify the 0011 changes are cleanly reversible.
-    """
+def test_B_02_unsafe_downgrade_is_refused_and_schema_is_preserved():
+    """Signed tenant isolation must never downgrade to forgeable unsigned GUC policies."""
     api_dir = Path(__file__).resolve().parents[2]
-    # First ensure we're at head
-    r0 = subprocess.run(
-        ["alembic", "upgrade", "head"],
-        cwd=str(api_dir),
-        capture_output=True,
-        text=True,
-        env={**os.environ, "DATABASE_URL": SETUP_DB_URL},
-    )
-    assert r0.returncode == 0, f"upgrade to head failed: {r0.stderr}"
+    env = {**os.environ, "DATABASE_URL": SETUP_DB_URL}
 
-    # Downgrade to 0010 (0012 → 0011 → 0010)
-    r1 = subprocess.run(
+    upgrade = subprocess.run(["alembic", "upgrade", "head"], cwd=str(api_dir),
+                             capture_output=True, text=True, env=env)
+    assert upgrade.returncode == 0, f"upgrade to head failed: {upgrade.stderr}"
+
+    downgrade = subprocess.run(
         ["alembic", "downgrade", "0010_sa_auth_hardening"],
-        cwd=str(api_dir),
-        capture_output=True,
-        text=True,
-        env={**os.environ, "DATABASE_URL": SETUP_DB_URL},
+        cwd=str(api_dir), capture_output=True, text=True, env=env,
     )
-    assert r1.returncode == 0, f"downgrade failed: {r1.stderr}"
-    # Verify 0011 changes are gone
+    assert downgrade.returncode != 0, "unsafe downgrade unexpectedly succeeded"
+    assert "Unsafe downgrade refused" in downgrade.stderr
+
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
         with conn.cursor() as cur:
-            # message_attachments.agency_id should be gone
-            cur.execute(
-                "SELECT COUNT(*) FROM information_schema.columns "
-                "WHERE table_name='message_attachments' AND column_name='agency_id'"
-            )
-            assert cur.fetchone()[0] == 0, "agency_id column still exists after downgrade"
-            # RLS on subscriptions should be gone
-            cur.execute(
-                "SELECT relrowsecurity FROM pg_class WHERE relname='subscriptions'"
-            )
-            assert not cur.fetchone()[0], "subscriptions RLS still enabled after downgrade"
+            cur.execute("SELECT version_num FROM alembic_version")
+            assert cur.fetchone()[0] == "0019_signed_tenant_context_rls"
+            cur.execute("SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname='subscriptions'")
+            row = cur.fetchone()
+            assert row == (True, True), "subscriptions RLS changed after refused downgrade"
+            cur.execute("SELECT COUNT(*) FROM information_schema.columns WHERE table_name='message_attachments' AND column_name='agency_id'")
+            assert cur.fetchone()[0] == 1, "message_attachments.agency_id was removed"
     finally:
         conn.close()
-    # Re-upgrade
-    r2 = subprocess.run(
-        ["alembic", "upgrade", "head"],
-        cwd=str(api_dir),
-        capture_output=True,
-        text=True,
-        env={**os.environ, "DATABASE_URL": SETUP_DB_URL},
-    )
-    assert r2.returncode == 0, f"re-upgrade failed: {r2.stderr}"
 
-    # Dispose ALL engine connection pools — the schema was dropped + recreated
-    # during this test, so existing pooled connections are stale.
-    from app.db.database import engine, super_admin_engine, super_admin_auth_engine
-    engine.dispose()
-    super_admin_engine.dispose()
-    super_admin_auth_engine.dispose()
+    reupgrade = subprocess.run(["alembic", "upgrade", "head"], cwd=str(api_dir),
+                               capture_output=True, text=True, env=env)
+    assert reupgrade.returncode == 0, f"idempotent re-upgrade failed: {reupgrade.stderr}"
 
 
 # ---------------------------------------------------------------------------
