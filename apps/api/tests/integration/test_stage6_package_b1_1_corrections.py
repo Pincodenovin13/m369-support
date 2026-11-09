@@ -25,6 +25,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session as SASession
 
 from app.security import hash_password
+from app.tenancy.context import set_tenant_context
 
 
 pytestmark = [pytest.mark.security, pytest.mark.integration]
@@ -288,7 +289,7 @@ def test_B1_1_06_attachment_rls_full_crud_cross_tenant(setup_session):
     app_engine = create_engine("postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support_test")
     with SASession(app_engine) as session:
         # Set tenant context to B
-        session.execute(text(f"SET LOCAL app.tenant_id = '{agency_b}'"))
+        set_tenant_context(session, agency_b)
 
         # 1. SELECT — Tenant B should see 0 attachments (RLS hides A's)
         count = session.execute(text("SELECT COUNT(*) FROM message_attachments")).fetchone()
@@ -320,7 +321,7 @@ def test_B1_1_06_attachment_rls_full_crud_cross_tenant(setup_session):
         session.rollback()
 
     with SASession(app_engine) as session:
-        session.execute(text(f"SET LOCAL app.tenant_id = '{agency_b}'"))
+        set_tenant_context(session, agency_b)
 
         # 3. UPDATE — should match 0 rows (RLS hides A's rows)
         result = session.execute(text(
@@ -329,7 +330,7 @@ def test_B1_1_06_attachment_rls_full_crud_cross_tenant(setup_session):
         assert result.rowcount == 0, "Tenant B was able to UPDATE Tenant A's attachment — RLS UPDATE broken"
 
     with SASession(app_engine) as session:
-        session.execute(text(f"SET LOCAL app.tenant_id = '{agency_b}'"))
+        set_tenant_context(session, agency_b)
 
         # 4. DELETE — should match 0 rows (RLS hides A's rows)
         result = session.execute(text(
@@ -339,7 +340,7 @@ def test_B1_1_06_attachment_rls_full_crud_cross_tenant(setup_session):
 
     # 5. Tenant A should still be able to read its own attachment
     with SASession(app_engine) as session:
-        session.execute(text(f"SET LOCAL app.tenant_id = '{agency_a}'"))
+        set_tenant_context(session, agency_a)
         row = session.execute(text(
             f"SELECT filename FROM message_attachments WHERE id = '{att_a}'"
         )).fetchone()

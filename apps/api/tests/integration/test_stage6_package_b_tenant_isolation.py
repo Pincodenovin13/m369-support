@@ -20,6 +20,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from app.tenancy.context import set_tenant_context
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session as SASession
 
@@ -88,7 +89,7 @@ def _make_message(setup, agency_id, conversation_id):
 
 
 def _set_tenant(session, agency_id):
-    session.execute(text(f"SET LOCAL app.tenant_id = '{agency_id}'"))
+    set_tenant_context(session, agency_id)
 
 
 # ---------------------------------------------------------------------------
@@ -454,7 +455,7 @@ def test_B_13_tenant_a_cannot_read_tenant_b(setup_session):
     # Connect as m369_app, set tenant to A, try to read B's subscription
     app_engine = create_engine("postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support_test")
     with SASession(app_engine) as session:
-        session.execute(text(f"SET LOCAL app.tenant_id = '{agency_a}'"))
+        set_tenant_context(session, agency_a)
         rows = session.execute(text("SELECT COUNT(*) FROM subscriptions")).fetchone()
         assert rows[0] == 0, "Tenant A saw Tenant B's subscription — RLS broken"
 
@@ -477,7 +478,7 @@ def test_B_14_tenant_a_cannot_insert_tenant_b(setup_session):
 
     app_engine = create_engine("postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support_test")
     with SASession(app_engine) as session:
-        session.execute(text(f"SET LOCAL app.tenant_id = '{agency_a}'"))
+        set_tenant_context(session, agency_a)
         sub_id = uuid.uuid4()
         with pytest.raises(Exception):
             session.execute(text(
@@ -509,15 +510,14 @@ def test_B_15_tenant_a_cannot_update_tenant_b(setup_session):
 
     app_engine = create_engine("postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support_test")
     with SASession(app_engine) as session:
-        session.execute(text(f"SET LOCAL app.tenant_id = '{agency_a}'"))
+        set_tenant_context(session, agency_a)
         # This UPDATE will match 0 rows (RLS hides B's rows) — but no error
         result = session.execute(text(
             f"UPDATE subscriptions SET status='cancelled' WHERE id='{sub_b_id}'"
         ))
         assert result.rowcount == 0, "Tenant A was able to UPDATE Tenant B's subscription — RLS broken"
         # Verify B's subscription is still 'active'
-        session.execute(text(f"RESET app.tenant_id"))
-        session.execute(text(f"SET LOCAL app.tenant_id = '{agency_b}'"))
+        set_tenant_context(session, agency_b)
         row = session.execute(text(f"SELECT status FROM subscriptions WHERE id='{sub_b_id}'")).fetchone()
         assert row[0] == "active", "Tenant B's subscription was modified by Tenant A"
 
@@ -545,7 +545,7 @@ def test_B_16_tenant_a_cannot_move_to_tenant_b(setup_session):
 
     app_engine = create_engine("postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support_test")
     with SASession(app_engine) as session:
-        session.execute(text(f"SET LOCAL app.tenant_id = '{agency_a}'"))
+        set_tenant_context(session, agency_a)
         # Try to move A's subscription to B — RLS WITH CHECK should reject
         with pytest.raises(Exception):
             session.execute(text(
