@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { Loading, ErrorState, EmptyState, PageHeader, Badge } from "@/components/ui";
-import { conversationApi, ApiError, type ConversationOut, type PaginatedResponse } from "@/lib/api-client";
+import { conversationApi, type ConversationOut, type PaginatedResponse } from "@/lib/api-client";
 
 const STATUS_FILTERS: { label: string; value?: string }[] = [
   { label: "All" },
