@@ -50,19 +50,19 @@ export default function CannedResponsesPage() {
                   className="w-full text-left flex items-center justify-between"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-gray-900 truncate">{cr.title}</div>
+                    <div className="text-sm font-medium text-gray-900 truncate">{cr.shortcut}</div>
                     <div className="text-xs text-gray-500 truncate">
-                      {cr.body.slice(0, 80)}
-                      {cr.body.length > 80 ? "..." : ""}
+                      {cr.content.slice(0, 80)}
+                      {cr.content.length > 80 ? "..." : ""}
                     </div>
                   </div>
                   <span className="text-xs text-gray-400 ml-4">
-                    Updated {new Date(cr.updated_at).toLocaleDateString()}
+                    Updated {new Date(cr.created_at).toLocaleDateString()}
                   </span>
                 </button>
                 {expandedId === cr.id && (
                   <div className="mt-3 px-3 py-2 bg-gray-50 rounded-md text-sm text-gray-700 whitespace-pre-wrap">
-                    {cr.body}
+                    {cr.content}
                   </div>
                 )}
               </li>
