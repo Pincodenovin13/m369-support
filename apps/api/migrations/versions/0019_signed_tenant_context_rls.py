@@ -27,11 +27,11 @@ def upgrade() -> None:
     if extension_schema != "public":
         op.execute("ALTER EXTENSION pgcrypto SET SCHEMA public")
     op.execute("""
-      DO $ BEGIN
+      DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='m369_tenant_context') THEN
           CREATE ROLE m369_tenant_context NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION NOINHERIT;
         END IF;
-      END $;
+      END $$;
     """)
     # Enforce the verifier owner role's attributes even if it pre-existed.
     op.execute("ALTER ROLE m369_tenant_context NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION NOINHERIT")
@@ -51,7 +51,7 @@ def upgrade() -> None:
         LOOP
           EXECUTE format('REVOKE %I FROM %I', m.granted_role, m.member_role);
         END LOOP;
-      END $;
+      END $$;
     """)
     op.execute("CREATE SCHEMA m369_private AUTHORIZATION postgres")
     op.execute("REVOKE ALL ON SCHEMA m369_private FROM PUBLIC, m369_app")
@@ -122,7 +122,7 @@ def upgrade() -> None:
             RAISE EXCEPTION 'RLS policy invariant failed for %. Expected exactly one policy, found %', t, policy_count;
           END IF;
         END LOOP;
-      END $;
+      END $$;
     """)
     op.execute("REVOKE CREATE ON SCHEMA public FROM m369_app")
 
