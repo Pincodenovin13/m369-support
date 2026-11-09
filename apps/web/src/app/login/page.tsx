@@ -54,21 +54,23 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
-      <div className="w-full max-w-md space-y-8 rounded-xl bg-white p-8 shadow-lg">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-[#111c2e] via-[#17263c] to-[#263b55] px-4 py-10 sm:px-6">
+      <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-80 w-80 rounded-full bg-brand-500/10 blur-3xl" />
+      <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 -right-20 h-96 w-96 rounded-full bg-cyan-400/10 blur-3xl" />
+      <div className="relative z-10 w-full max-w-md space-y-8 rounded-[28px] border border-white/70 bg-white p-7 shadow-2xl shadow-slate-950/25 sm:p-10">
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-500 text-white text-2xl font-bold mb-4">
+          <div className="mb-5 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-500 text-xl font-black text-white shadow-lg shadow-orange-500/25">
             M
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Sign in to M369</h1>
-          <p className="mt-2 text-sm text-gray-600">
+          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-[28px]">Sign in to M369</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-500">
             Enter your credentials to access your agency dashboard
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+            <label htmlFor="email" className="block text-xs font-bold text-slate-700">
               Email
             </label>
             <input
@@ -83,7 +85,7 @@ export default function LoginPage() {
                 setAgencyOptions([]);
                 setSelectedAgency(null);
               }}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="mt-2 block min-h-12 w-full rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-900 placeholder-slate-400 transition focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-orange-500/10"
               placeholder="you@example.com"
             />
           </div>
@@ -113,7 +115,7 @@ export default function LoginPage() {
                 id="agency"
                 value={selectedAgency ?? ""}
                 onChange={(e) => setSelectedAgency(e.target.value || null)}
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className="mt-2 block min-h-12 w-full rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-900 transition focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-orange-500/10"
               >
                 <option value="">— Choose an agency —</option>
                 {agencyOptions.map((opt) => (
@@ -137,15 +139,15 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="mt-1 min-h-12 w-full rounded-xl bg-brand-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-orange-500/20 transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
 
-        <p className="text-center text-sm text-gray-600">
+        <p className="text-center text-sm text-slate-500">
           Don&apos;t have an account?{" "}
-          <Link href="/register" className="font-medium text-brand-600 hover:text-brand-700">
+          <Link href="/register" className="font-bold text-brand-600 transition hover:text-brand-700">
             Register your agency
           </Link>
         </p>
