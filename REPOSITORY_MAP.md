@@ -1,7 +1,7 @@
 # M369 Support — Repository Map
 
 > **Status:** Authoritative file-placement map for the M369 Support repository.
-> **Last updated:** 2026-11-08
+> **Last updated:** 2026-11-09
 > **Branch:** `refactor/repository-structure-unification`
 > **Companion documents:** [`/STATE.md`](./STATE.md) (current state) · [`/CONTRIBUTING.md`](./CONTRIBUTING.md) (workflow rules)
 
@@ -24,7 +24,7 @@ m369-support/
 ├── docs/                        # Architecture, security, database, development docs
 ├── recovery/                    # HISTORICAL archive — not authoritative
 │   └── workspace-preservation/ # Archived artifacts from prior sessions
-├── .github/                     # GitHub config (PR template only; no CI workflow tracked)
+├── .github/                     # GitHub Actions security CI + repository templates
 ├── docker-compose.yml           # Local dev orchestration (db + redis + api)
 ├── .env.example                 # Environment variable template (no secrets)
 ├── .gitignore                   # Python + Node + IDE + env patterns
@@ -55,7 +55,7 @@ m369-support/
 | `apps/api/app/services/` | Business logic (stateless functions) | `audit.py:write_audit`, `billing.py`, `rate_limit.py`, `sa_auth.py` | Domain logic, atomic DB updates, Redis calls | Route handlers |
 | `apps/api/app/tenancy/` | Tenant context primitives | `context.py:TenantContext`, `set_tenant_context`, `clear_tenant_context`, `TenantOwned` mixin | Tenant GUC management, tenant-owned mixin | Middleware, business logic |
 | `apps/api/app/slugs.py` | Slug utility for unique URL-safe names | `unique_slug()` | Slug generation only | Anything else |
-| `apps/api/migrations/` | Alembic config + migrations | `env.py`, `versions/0001_initial.py` through `0018_workspace_agency_fks_contacts_teams.py` | Schema migrations and explicitly validated data backfills | Application code |
+| `apps/api/migrations/` | Alembic config + migrations | `env.py`, `versions/0001_initial.py` through `0019_signed_tenant_context_rls.py` | Schema migrations and explicitly validated data backfills | Application code |
 | `apps/api/scripts/` | Operational scripts | `create_super_admin.py`, `provision_sa_auth_role.py` | One-off provisioning + admin scripts | Tests, application code |
 | `apps/api/tests/` | Test suite | `conftest.py`, `unit/`, `integration/` | Tests only | Application code, scripts |
 | `apps/api/Dockerfile` | API container image | — | Build + runtime for API service | Frontend, widget |
@@ -69,12 +69,12 @@ m369-support/
 | Metric | Value |
 |---|---|
 | Backend source files (`apps/api/app/**/*.py`) | 58 |
-| Backend test/support Python files (`apps/api/tests/**/*.py`) | 24 |
-| Static test function count | 350 (346 prior count + 4 new tests; not re-counted — see STATE.md) |
-| Migrations | 18 (0001–0018, linear chain) |
+| Backend test/support Python files (`apps/api/tests/**/*.py`) | 25 |
+| Static test function count | Not re-counted after signed RLS tests; see STATE.md |
+| Migrations | 19 (0001–0019, linear chain) |
 | Database tables | 25 (14 in `models/__init__.py` + 11 in `models/phase1_extended.py`) |
 | API endpoints | 64 (verified via `grep -rhE '@router\.(get\|post\|put\|patch\|delete)'`) |
-| Database roles | 6 (`m369_app`, `m369_sa_auth`, `m369_sa_runner`, `m369_login_reader`, `m369_registration_guard`, `m369_super_admin` neutralized) |
+| Database roles | 7 (previous six plus `m369_tenant_context` verifier owner) |
 
 ---
 
@@ -156,6 +156,7 @@ See [`docs/README.md`](./docs/README.md) for the documentation index.
 
 | Path | Responsibility |
 |---|---|
+| `.github/workflows/api-postgres-security.yml` | PostgreSQL 16 focused tenant-isolation/security integration suite | — | CI validation of signed RLS policies | Production deployment workflows |
 | `.github/PULL_REQUEST_TEMPLATE.md` | Required PR sections (purpose, changed files, security impact, migration impact, tests executed, tests not executed + why, rollback, evidence, verification labels) |
 
 ---

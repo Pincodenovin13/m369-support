@@ -1,12 +1,12 @@
 # M369 Support — Project State
 
-> **Last updated:** 2026-11-09 — tenant-isolation review and two corrective migrations
+> **Last updated:** 2026-11-09 — signed tenant-context RLS hardening verified in PostgreSQL 16 CI
 > **Canonical development branch:** `phase-1/foundation`
-> **Current working branch:** `refactor/repository-structure-unification` (HEAD: `39a480f6a8db4eec3ab0e4d5f5d5b8d45225c647`)
+> **Current working branch:** `refactor/repository-structure-unification` (HEAD: `d901887b6d8e0d80eb7015693e3be287157f8c3a`)
 > **Recovery branch:** `recovery/zai-workspace-2026-11-08` (HEAD: `1c3294154b41e051855613416f0bc68c3901d125`)
-> **Tracked files:** 179 (was 168 at start of this task)
-> **Migration head (filesystem):** `0018_workspace_agency_fks_contacts_teams` (18 migrations, linear chain)
-> **Migration head (database-applied):** UNVERIFIED — no reachable DB in audit sandbox
+> **Tracked files:** 182
+> **Migration head (filesystem):** `0019_signed_tenant_context_rls` (19 migrations, linear chain)
+> **Migration head (CI PostgreSQL 16):** `0019_signed_tenant_context_rls` — full Alembic upgrade from base succeeded in GitHub Actions; persistent deployment DB not inspected
 
 ---
 
@@ -14,7 +14,7 @@
 
 **Phase 1 (Foundation + Multi-Tenancy + Security Hardening)** — backend implementation complete on `phase-1/security-closure-b1-4` (commit `ab046a2`). The 16 hardening commits are NOT yet merged into `phase-1/foundation` on GitHub (foundation is still at Stage 4, commit `0b3139a`). A `recovery/zai-workspace-2026-11-08` branch preserves the Rule 13 documentation + historical artifacts. The current `refactor/repository-structure-unification` branch adds repository structure unification + frontend feature buildout.
 
-All test results below are **reported by Z.ai** (the implementation agent) from a local sandbox against a real PostgreSQL 16.2 instance. They have **not** been independently verified by a third party. The 2026-11-08 audit independently verified the frontend type-check only; backend tests could not be re-executed because the audit sandbox lacks the required Python dependencies (sqlalchemy, psycopg2, pgserver).
+Historical package test results below are labeled by their original source. The signed tenant-context/RLS closure is separately verified by a GitHub Actions run against PostgreSQL 16 (73 passed, 4 deselected). This does not mean the entire backend suite or a persistent production deployment has been verified.
 
 ---
 
@@ -63,11 +63,13 @@ All test results below are **reported by Z.ai** (the implementation agent) from 
   → 0015_revoke_super_admin_memberships_both_directions
   → 0016_extend_login_helper_with_agency_name
   → 0017_revoke_runtime_schema_create
-  → 0018_workspace_agency_fks_contacts_teams    ← HEAD
+  → 0018_workspace_agency_fks_contacts_teams
+  → 0019_signed_tenant_context_rls                ← HEAD
 ```
 
-**Filesystem head:** `0018_workspace_agency_fks_contacts_teams` (18 migrations, linear chain, verified from tracked migration files)
-**Database-applied head:** UNVERIFIED — `alembic` not run in audit sandbox; no reachable DB
+**Filesystem head:** `0019_signed_tenant_context_rls` (19 migrations, linear chain)
+**CI database head:** `0019_signed_tenant_context_rls` (PostgreSQL 16, GitHub Actions)
+**Persistent deployment database:** not inspected; apply the migration through the controlled deployment process before serving production traffic.
 
 ---
 
@@ -75,15 +77,15 @@ All test results below are **reported by Z.ai** (the implementation agent) from 
 
 | Metric | Value | Verification |
 |---|---|---|
-| Backend test files | 20 (3 unit + 17 integration) | Current tracked tree count; includes 2 newly added integration files |
-| Backend test functions (static count) | 346 | INDEPENDENTLY VERIFIED (count via `grep -rE 'def test_' \| wc -l`) |
-| Backend test execution | 346 prior tests reported passing; 4 new tests not run | Prior result is Z.ai-reported only; new tests require PostgreSQL execution |
+| Backend test files | 25 | Current tracked tree count on this branch |
+| Backend test functions (static count) | Not re-counted after RLS additions | Do not infer a full-suite count from the focused CI run |
+| Focused tenant-isolation/security CI | 73 passed, 4 deselected, 1 warning (12.42s) | ✅ GitHub Actions run `42589912453`, PostgreSQL 16; includes signed-context attacks, 16-table policy audit, RLS CRUD, API RBAC |
 | Frontend type-check (`tsc --noEmit`) | PASS (exit 0) | ✅ INDEPENDENTLY VERIFIED (2026-11-08, after frontend buildout) |
 | Frontend build (`next build`) | PASS | Z.ai-REPORTED ONLY |
 | Frontend lint (`next lint`) | PASS | Z.ai-REPORTED ONLY |
 | Frontend test suite | 0 files | NOT IMPLEMENTED (Phase 1 has no frontend tests) |
 | Frontend feature pages | 10 routes (login, register, dashboard, contacts, conversations, conversations/[id], teams, channels, canned-responses, kb) | ✅ IMPLEMENTED (2026-11-08, commit `9a6e98f`) |
-| CI workflow file (`.github/workflows/ci.yml`) | NOT PUSHED | BLOCKED — PAT lacks `workflow` scope; file delivered in `/home/z/my-project/download/ci-workflow/` for Product Owner to push |
+| CI workflow (`.github/workflows/api-postgres-security.yml`) | PASS | ✅ GitHub Actions run `42589912453` on commit `d901887`; PostgreSQL 16 |
 | Docker Compose deployment | BLOCKED | Docker unavailable in sandbox |
 | Real Redis integration | BLOCKED | fakeredis used for rate-limit tests |
 | Clean venv install | BLOCKED | No isolated venv in sandbox |
@@ -101,6 +103,7 @@ All test results below are **reported by Z.ai** (the implementation agent) from 
 | `m369_sa_runner` | ✅ | ✅ | Super Admin management (BYPASSRLS, least-privilege) |
 | `m369_login_reader` | ❌ | ✅ | SECURITY DEFINER function owner (login helper) |
 | `m369_registration_guard` | ❌ | ✅ | Registration check function owner |
+| `m369_tenant_context` | ❌ | ❌ | SECURITY DEFINER owner for the HMAC tenant verifier; SELECT only on private key row |
 | `m369_super_admin` | ❌ | ❌ | Neutralized (was BYPASSRLS + broad DML; now inert) |
 
 ---
@@ -110,16 +113,16 @@ All test results below are **reported by Z.ai** (the implementation agent) from 
 | # | Risk | Priority | Status |
 |---|---|---|---|
 | P0-1 | B.1.4 (16 hardening commits) NOT merged into `phase-1/foundation` on GitHub | Critical | foundation on GitHub still at Stage 4 (`0b3139a`) |
-| P0-2 | No independent verification of 346 backend tests | Critical | Z.ai-reported only |
+| P0-2 | Full backend suite not yet green in CI | Critical | Focused tenant-isolation suite is green (73 passed); legacy full-suite rate-limit and downgrade tests remain outside this focused run |
 | P0-3 | No security headers (HSTS, X-Content-Type-Options, CSP, etc.) | Critical | `apps/api/app/main.py` registers only CORS + TenantContext middlewares |
 | P0-4 | No request body size limits | Critical | No `max_request_size` enforcement |
-| P0-5 | Tenant identity uses user-settable `app.tenant_id` custom GUC | Critical | RLS does not prevent arbitrary SQL under shared `m369_app` from spoofing tenant context; signed-context or per-tenant DB identity hardening required before production |
+| P0-5 | Tenant GUC spoofing | Critical | CLOSED IN CODE: migration 0019 verifies HMAC-signed tenant context inside PostgreSQL; 73 focused CI tests passed. API process/key compromise remains in threat model |
 | P1-1 | Agency `User` accounts have no DB-side lockout (only Redis rate limit) | Important | Asymmetric with Super Admin |
 | P1-2 | No email verification flow | Important | Zero `email_verif*` references |
 | P1-3 | Password policy is length-only (10/12 chars) | Important | No complexity rules |
 | P1-4 | No structured logging | Important | Zero `import logging`/`structlog` |
 | P1-5 | Real Redis integration never exercised | Important | fakeredis in tests |
-| P1-6 | Real PostgreSQL + RLS never exercised by independent party | Important | psql not in sandbox |
+| P1-6 | Production database not independently inspected | Important | PostgreSQL 16 RLS integration suite is exercised in GitHub Actions; persistent deployment DB state remains unverified |
 | P1-7 | Reverse-proxy trusted-IP boundary not deployed | Important | No Caddy/Nginx configured |
 | P2-1 | No embeddable widget | Operational | `apps/widget/src/.gitkeep` placeholder |
 | P2-2 | No Knowledge Base Markdown rendering | Operational | `kb.py` sets `content_html=""` |
@@ -145,10 +148,24 @@ All test results below are **reported by Z.ai** (the implementation agent) from 
 | Commit | Change | Verification |
 |---|---|---|
 | `d9d945c` | Migration 0017 revokes schema CREATE from `m369_app` and PUBLIC; bootstrap grants USAGE only to runtime roles | Committed and fetched back from GitHub; PostgreSQL test not run here |
-| `94381f3` | Migration 0018 adds composite workspace/agency FKs for `contacts` and `teams`, after fail-closed data validation | Committed and fetched back from GitHub; PostgreSQL test not run here |
+| `94381f3` | Migration 0018 adds composite workspace/agency FKs for `contacts` and `teams`, after fail-closed data validation | Committed; included in the later PostgreSQL 16 migration run |
 
-Two integration test files were added for schema privileges and cross-agency workspace references. They have not been executed in this session.
+Schema-privilege and cross-agency workspace tests were added. The later focused PostgreSQL 16 CI run executes the relevant tenant-isolation and attachment-RLS coverage.
 
-### Tenant GUC trust-boundary finding
+### Tenant GUC trust-boundary finding — CLOSED IN CODE
 
-RLS policies compare tenant rows against the custom GUC `app.tenant_id`. A database role that can execute arbitrary SQL as `m369_app` can set that GUC to another agency ID. Existing bypass tests only prove that the removed `app.bypass_rls` GUC cannot disable RLS; they do not prevent spoofing `app.tenant_id`. The current model protects against ordinary API query omissions but does not cryptographically protect against arbitrary SQL execution under the shared runtime credential. Signed tenant-context verification or a stronger database identity boundary is a required production hardening decision.
+The unsigned-GUC spoofing weakness identified during this audit is addressed by migration 0019 and the signed tenant-context verifier described below. Raw `app.tenant_id` is no longer accepted by tenant policies without a matching HMAC signature. The residual threat is compromise of the API process or its secret, not arbitrary GUC changes from SQL execution alone.
+
+
+### Signed tenant-context RLS closure — 2026-11-09
+
+Commit at branch HEAD: `d901887b6d8e0d80eb7015693e3be287157f8c3a`.
+
+- Migration `0019_signed_tenant_context_rls` replaces unsigned GUC policies with `public.m369_current_tenant_id()`, a SECURITY DEFINER verifier using HMAC-SHA256.
+- The verifier reads its key from `m369_private.tenant_context_secret`; the `m369_app` runtime role has no schema/table access to that secret. A separate NOLOGIN, NOBYPASSRLS function-owner role has only the required SELECT privilege.
+- All 16 tenant-owned tables now have ENABLE + FORCE RLS and tenant policies bound to the verifier: agencies, workspaces, agency_memberships, teams, team_memberships, contacts, conversations, audit_logs, subscriptions, message_attachments, channels, kb_categories, kb_articles, canned_responses, payments, messages. `agency_notes` remains deny-all for tenant runtime.
+- Python signs canonical `m369:tenant:v1:<lowercase-uuid>` values with `M369_TENANT_CONTEXT_SECRET`. The same key must be supplied to migration and API containers; production config rejects a missing/short/dev key. No production key is stored in Git.
+- API auth dependency sets signed context; transaction hook restores both GUCs only for request sessions that explicitly request persistence. Test/helper context is transaction-local by default.
+- Positive and negative PostgreSQL 16 CI suite: **73 passed, 4 deselected, 1 warning** in 12.42 seconds. Run: https://github.com/Pincodenovin13/m369-support/actions/runs/42589912453
+- Migration downgrade intentionally refuses to restore unsigned policies. Operational rollback must be a forward security migration, not a downgrade to the vulnerable model.
+- This protects against SQL-only tenant-GUC forgery. Compromise of the API process or its HMAC key remains a separate high-severity threat.

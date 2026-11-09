@@ -4,18 +4,18 @@ M369 uses layered tenant isolation. The database schema, API authorization, and 
 
 ## 1. Row-Level Security
 
-RLS is enabled and forced on **17 tables**:
+RLS is enabled and forced on **17 tables** (16 tenant-isolated + 1 platform-private):
 
 | Group | Tables | Policy |
 |---|---|---|
 | Initial (0001) | `agencies`, `workspaces`, `agency_memberships`, `teams`, `team_memberships`, `contacts`, `conversations`, `audit_logs` | Tenant policy; `agencies.id` or `agency_id` |
-| Extended (0006) | `messages`, `channels`, `kb_categories`, `kb_articles`, `canned_responses`, `payments` | Tenant policy on `agency_id` |
+| Extended tables (enabled by 0019) | `messages`, `channels`, `kb_categories`, `kb_articles`, `canned_responses`, `payments` | Signed tenant policy on `agency_id` |
 | Hardened (0011) | `subscriptions`, `message_attachments` | Tenant policy on `agency_id` |
 | Platform-private (0011) | `agency_notes` | `USING (false)` and `WITH CHECK (false)`; Super Admin runner bypasses RLS |
 
 Therefore, **16 tables use an agency-specific RLS policy** and one platform-private table uses a deny-all policy for roles subject to RLS.
 
-Tenant policies compare the row's agency identifier with `current_setting('app.tenant_id', true)`. Missing tenant context fails closed. All listed tables use both `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY`.
+Tenant policies compare the row's agency identifier with `public.m369_current_tenant_id()`. That SECURITY DEFINER function returns a UUID only when the transaction-local `app.tenant_id` and `app.tenant_sig` settings contain a valid HMAC-SHA256 pair. Missing, malformed, forged, or mismatched context returns NULL (fail-closed). All 17 tables use both `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY`.
 
 There is no `app.bypass_rls` policy or GUC-based Super Admin bypass.
 
@@ -35,7 +35,8 @@ Migration 0018 validates existing data before adding the last two constraints. I
 - `get_current_user` checks the user exists, is active, and the JWT `tver` matches the database `token_version`.
 - `get_current_agency_id` verifies active membership in the agency and that the agency itself is active.
 - `require_role(...)` checks the membership role for write/admin operations.
-- `set_tenant_context` sets `app.tenant_id` transaction-locally. The SQLAlchemy `after_begin` listener re-applies the tenant value after a transaction boundary using the validated session value.
+- `set_tenant_context` signs the canonical `m369:tenant:v1:<lowercase-uuid>` string and sets both GUCs transaction-locally using bound parameters. Test/helper calls do not persist across transactions by default; the authenticated request dependency explicitly opts into session restoration for post-commit refresh operations.
+- The SQLAlchemy `after_begin` listener restores both the tenant UUID and its signature only when the authenticated dependency marked the session for persistence.
 
 The API also adds explicit agency predicates to tenant queries. These predicates are defense in depth; RLS and composite constraints remain necessary.
 
@@ -48,18 +49,25 @@ The API also adds explicit agency predicates to tenant queries. These predicates
 | `m369_sa_runner` | Yes | Yes | Super Admin management; table grants are restricted |
 | `m369_login_reader` | No | Yes | Owner of the narrowly scoped login membership function; SELECT on agencies/memberships only |
 | `m369_registration_guard` | No | Yes | Owner of the initial-registration check function |
+| `m369_tenant_context` | No | No | SECURITY DEFINER owner of the HMAC verifier; SELECT only on the private signing-key table |
 | `m369_super_admin` | No | No | Neutralized legacy role; no active privilege path |
 
 Migration 0017 removes `CREATE` on schema `public` from `m369_app` and `PUBLIC`, while preserving `USAGE`. The bootstrap script now grants schema `USAGE`, not `ALL`.
 
-## 5. Important Trust Boundary — Tenant GUC
+## 5. Important Trust Boundary — Signed Tenant Context
 
-**RLS based on `app.tenant_id` is not, by itself, protection against an attacker who can execute arbitrary SQL as `m369_app`.** PostgreSQL custom GUCs such as `app.tenant_id` can be set by that database role. Someone with arbitrary SQL execution under the shared runtime credential could change the value and attempt to read another tenant's rows.
+A raw `app.tenant_id` custom GUC is user-settable by `m369_app` and cannot be trusted on its own. Migration 0019 closes that gap for SQL injection/arbitrary SQL under the runtime role:
 
-The current design therefore relies on the API being the trusted holder of the database credential and on preventing SQL injection. RLS protects against missing tenant filters and ordinary application query mistakes; it does not cryptographically authenticate the tenant identity to PostgreSQL. If the threat model includes arbitrary SQL execution or compromise of the runtime DB credential, a signed tenant-context verification mechanism (or a stronger per-tenant DB identity boundary) is a required follow-up before production.
+1. The API signs `m369:tenant:v1:<canonical-lowercase-uuid>` with HMAC-SHA256 using `M369_TENANT_CONTEXT_SECRET`.
+2. PostgreSQL recomputes and compares the HMAC inside `public.m369_current_tenant_id()`.
+3. The key is stored in `m369_private.tenant_context_secret`; `m369_app` has no USAGE on the private schema and no SELECT privilege on the key table.
+4. The verifier is SECURITY DEFINER with fixed `search_path=pg_catalog`, owned by `m369_tenant_context` (NOLOGIN, NOBYPASSRLS), and EXECUTE is granted only to `m369_app`.
+5. All 16 tenant policies use the verifier; `agency_notes` remains deny-all.
 
-The existing `test_rls_bypass_attack.py` verifies that `app.bypass_rls` cannot disable policies. It does **not** prove that `app.tenant_id` itself cannot be spoofed.
+The same secret must be provisioned to the migration runner and API process. Production startup rejects a short or development key. Never put the production value in Git, logs, client code, or a message. A compromise of the API process/environment or the HMAC key can still forge context; HMAC does not defend against full API host compromise.
 
 ## 6. Verification Status
 
-Migrations 0017 and 0018 and regression tests were added to the repository. Their tests have **not yet been executed** in this session. Do not treat them as passing until run against PostgreSQL 16 using the migration chain from 0001 through 0018.
+GitHub Actions run [`42589912453`](https://github.com/Pincodenovin13/m369-support/actions/runs/42589912453) executed the migration chain on PostgreSQL 16 and ran the focused tenant-isolation/security suite: **73 passed, 4 deselected, 1 warning (12.42s)**. Coverage includes valid signed access, unsigned/mismatched tenant forgery, private-key access denial, ENABLE/FORCE + verifier policy on all 16 tenant tables, cross-tenant CRUD attempts, the bypass-GUC attack tests, API RBAC/IDOR routes, and attachment RLS.
+
+The complete backend suite was not run green in this workflow: legacy rate-limit and downgrade tests were excluded from the focused security command. The persistent deployment database and Docker Compose deployment remain unverified. Migration 0019 deliberately refuses downgrade to the unsigned-GUC security model.
