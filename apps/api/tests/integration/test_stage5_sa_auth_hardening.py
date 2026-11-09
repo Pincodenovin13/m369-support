@@ -223,12 +223,20 @@ def test_6_correct_password_during_lockout_rejected(client: TestClient, setup_se
             json={"email": admin.email, "password": "wrong"},
         )
 
-    # Now try with the CORRECT password — should still fail
-    r = client.post(
+    # Correct password during lockout is still rejected, without revealing
+    # whether this email belongs to a locked account.
+    locked = client.post(
         "/api/v1/super-admin/auth/login",
         json={"email": admin.email, "password": "correct-password-123"},
     )
-    assert r.status_code == 423, f"expected 423 Locked, got {r.status_code}: {r.text}"
+    unknown = client.post(
+        "/api/v1/super-admin/auth/login",
+        json={"email": f"missing-{uuid.uuid4().hex}@example.invalid", "password": "correct-password-123"},
+    )
+    assert locked.status_code == 401, f"expected generic 401, got {locked.status_code}: {locked.text}"
+    assert locked.json() == unknown.json(), (
+        "Locked-account response differs from unknown-account response; email enumeration possible"
+    )
 
 
 def test_7_login_allowed_after_lockout_expires(client: TestClient, setup_session: Session):
