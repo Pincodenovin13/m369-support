@@ -186,7 +186,7 @@ class PaymentVerifyRequest(BaseModel):
     service records the raw on-chain values + decimals + rate for audit.
     """
 
-    amount_paid: int = Field(ge=0)  # cents, in base currency
+    amount_paid: int = Field(ge=0, le=2147483647)  # cents, PostgreSQL INTEGER range
     paid_currency: str | None = Field(default=None, min_length=3, max_length=10)  # ISO 4217 or crypto code (e.g., USDT)
     paid_amount_raw: int | None = Field(default=None, ge=0, le=10**78 - 1)
     paid_amount_decimals: int | None = Field(default=None, ge=0, le=18)
