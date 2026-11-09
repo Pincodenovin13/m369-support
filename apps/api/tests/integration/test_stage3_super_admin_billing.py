@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import Numeric, select, text
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -461,10 +461,51 @@ def test_sa_payment_financial_precision_integer_cents(client: TestClient, setup_
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["amount_paid"] == 1999  # integer cents
-    assert body["paid_amount_raw"] == 19990000  # raw integer from blockchain
+    assert body["paid_amount_raw"] == "19990000"  # exact raw integer serialized as a string
     assert body["paid_amount_decimals"] == 6
     # exchange_rate comes back as float (Numeric) — verify it's stored correctly
     assert body["exchange_rate"] == 1.0
+
+
+
+def test_sa_payment_raw_token_amount_preserves_uint256_precision(
+    client: TestClient,
+    setup_session: Session,
+    agency_a,
+    sa_token,
+):
+    """Raw token units must survive values beyond INTEGER and JS safe-number limits."""
+    a, _, _ = agency_a
+    plan = _make_plan(setup_session, name="raw-precision-plan")
+    sub = _make_subscription(setup_session, a, plan, status="active")
+    pay = _make_payment(setup_session, sub, a, txid="tx-raw-precision")
+
+    raw_amount = 12345678901234567890123456789012345678901234567890
+    raw_column = Payment.__table__.c.paid_amount_raw.type
+    assert isinstance(raw_column, Numeric)
+    assert raw_column.precision == 78
+    assert raw_column.scale == 0
+
+    response = client.post(
+        f"/api/v1/super-admin/payments/{pay.id}/verify",
+        headers=_sa_headers(sa_token),
+        json={
+            "amount_paid": 1900,
+            "paid_currency": "USDT",
+            "paid_amount_raw": raw_amount,
+            "paid_amount_decimals": 18,
+            "exchange_rate": 1.0,
+            "network": "bsc",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["paid_amount_raw"] == str(raw_amount)
+
+    setup_session.expire_all()
+    stored = setup_session.get(Payment, pay.id)
+    assert stored is not None
+    assert int(stored.paid_amount_raw) == raw_amount
+
 
 
 # ---------------------------------------------------------------------------
