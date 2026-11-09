@@ -157,7 +157,7 @@ See [`docs/README.md`](./docs/README.md) for the documentation index.
 
 | `.github/dependabot.yml` | Weekly dependency update PR configuration for npm and GitHub Actions |
 | `.github/workflows/web-ci.yml` | Read-only web validation: `npm ci`, npm audit, TypeScript, ESLint, production build |
-| `.github/workflows/refresh-web-lockfile.yml` | REMOVED 2026-11-09: lockfile mutation is manual and reviewable; CI uses `npm ci` only |
+| `.github/workflows/refresh-web-lockfile.yml` | Removed 2026-11-09; dependency changes are reviewed manually and CI uses `npm ci` |
 
 | Path | Responsibility |
 |---|---|
