@@ -111,16 +111,19 @@ export interface MessageOut {
   id: string;
   conversation_id: string;
   agency_id: string;
-  sender_type: "contact" | "agent" | "system" | "ai";
-  sender_id: string | null;
-  body: string;
+  sender_type: string;
+  sender_user_id: string | null;
+  content: string;
+  is_internal: boolean;
+  delivery_status: string | null;
   created_at: string;
 }
 
 export interface MessageCreate {
   conversation_id: string;
-  sender_type: "agent";
-  body: string;
+  content: string;
+  is_internal?: boolean;
+  reply_to_message_id?: string | null;
 }
 
 export interface TeamOut {
@@ -173,21 +176,19 @@ export interface CannedResponseOut {
   id: string;
   workspace_id: string;
   agency_id: string;
-  title: string;
-  body: string;
+  shortcut: string;
+  content: string;
   created_at: string;
-  updated_at: string;
 }
 
 export interface CannedResponseCreate {
   workspace_id: string;
-  title: string;
-  body: string;
+  shortcut: string;
+  content: string;
 }
 
 export interface CannedResponseUpdate {
-  title?: string;
-  body?: string;
+  content?: string;
 }
 
 export interface KBCategoryOut {
@@ -214,11 +215,14 @@ export interface KBArticleOut {
   agency_id: string;
   category_id: string | null;
   title: string;
+  slug: string;
   content_md: string;
-  content_html: string;
   is_published: boolean;
+  views_count: number;
+  helpful_count: number;
+  not_helpful_count: number;
+  author_id: string | null;
   created_at: string;
-  updated_at: string;
 }
 
 export interface KBArticleCreate {
@@ -418,7 +422,7 @@ export const workspaceApi = {
 };
 
 export const contactApi = {
-  list(params?: { limit?: number; offset?: number; q?: string }): Promise<PaginatedResponse<ContactOut>> {
+  list(params?: { limit?: number; offset?: number; search?: string; workspace_id?: string }): Promise<PaginatedResponse<ContactOut>> {
     return request<PaginatedResponse<ContactOut>>(`/contacts${buildQuery(params as Record<string, string | number | undefined> | undefined)}`);
   },
   get(contactId: string): Promise<ContactOut> {
@@ -449,7 +453,7 @@ export const conversationApi = {
 
 export const messageApi = {
   list(conversationId: string, params?: { limit?: number; offset?: number }): Promise<PaginatedResponse<MessageOut>> {
-    return request<PaginatedResponse<MessageOut>>(`/conversations/${conversationId}/messages${buildQuery(params as Record<string, string | number | undefined> | undefined)}`);
+    return request<PaginatedResponse<MessageOut>>(`/messages${buildQuery({ conversation_id: conversationId, ...params } as Record<string, string | number | undefined>)}`);
   },
   send(input: MessageCreate): Promise<MessageOut> {
     return request<MessageOut>("/messages", { method: "POST", body: JSON.stringify(input) });
