@@ -461,7 +461,7 @@ export const messageApi = {
 };
 
 export const teamApi = {
-  list(params?: { limit?: number; offset?: number }): Promise<PaginatedResponse<TeamOut>> {
+  list(params?: { limit?: number; offset?: number; workspace_id?: string }): Promise<PaginatedResponse<TeamOut>> {
     return request<PaginatedResponse<TeamOut>>(`/teams${buildQuery(params as Record<string, string | number | undefined> | undefined)}`);
   },
   create(input: TeamCreate): Promise<TeamOut> {
