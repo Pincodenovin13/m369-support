@@ -10,6 +10,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: web-lockfile-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   refresh-lockfile:
     runs-on: ubuntu-latest
