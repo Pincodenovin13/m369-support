@@ -28,6 +28,11 @@ Export generation, monthly scheduling and webhook retries may need background pr
 
 A single VPS is economical but is not high availability: a host failure can take the service offline until restored.
 
+
+## 2.1 Current Compose file is for local development only
+
+The repository's current docker-compose.yml is explicitly a local-development stack: it bind-mounts the API source, starts Uvicorn with --reload, and exposes development-oriented container behavior. Do not deploy that file unchanged to production. A production Compose profile/release configuration still needs to be implemented and reviewed: immutable pinned images, no source bind mounts, no reload, non-root runtime where compatible, resource limits, private networks, persistent volumes, health checks, controlled migration job, reverse proxy/TLS and backup integration. The current API container also receives a separate Super Admin management database credential; this privileged path needs route-level authorization and production secret-boundary review before launch.
+
 ## 3. Select a VPS based on evidence
 
 Before purchase, estimate agencies, seats, daily conversations/messages, attachment volume, data retention, database growth and target-market latency. Compare provider region, privacy/data-processing terms, CPU, RAM, SSD performance, traffic, snapshots, recovery support and permitted payment methods. Use load tests and PostgreSQL metrics to choose capacity; do not buy solely on the lowest advertised price. No exact server size or vendor is approved by this draft.
