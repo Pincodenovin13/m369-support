@@ -21,7 +21,7 @@ Audited HEAD: `ce3d54a2df13494ee914bea2f0677dd11f736a0c`
 
 ### 2. Active tree inventory
 
-- 201 tracked blobs.
+- 202 tracked blobs at audited application/docs snapshot; one mutating lockfile workflow was subsequently removed in commit `6043cfffe0ee4642fc55c4811f6ae87c481ca9ec`.
 - 58 Python application files under `apps/api/app/`.
 - 25 Python test/support files under `apps/api/tests/`.
 - 20 Alembic migration files, ending at `0020_payment_raw_amount_precision`.
@@ -52,7 +52,7 @@ These references can mislead contributors/agents even though they do not directl
 
 - `.github/workflows/api-postgres-security.yml` runs the full API test command `pytest -q tests` against PostgreSQL 16 for API, compose/env and security-doc changes. It does not run for every repository file by design.
 - `.github/workflows/web-ci.yml` runs npm ci, audit, TypeScript, ESLint and production build on web changes.
-- `.github/workflows/refresh-web-lockfile.yml` is a mutating workflow: after package.json changes it regenerates the lockfile, runs `npm audit fix`, commits and pushes to the active branch. This is distinct from the read-only `npm ci` validation. Review whether automatic dependency mutation should remain enabled; no change made in this audit.
+- `.github/workflows/refresh-web-lockfile.yml` was removed in commit `6043cfffe0ee4642fc55c4811f6ae87c481ca9ec`. Dependency updates are explicit; web CI uses `npm ci` and does not rewrite or push lockfiles.
 - API CI on audited HEAD: [run 42646416006](https://github.com/Pincodenovin13/m369-support/actions/runs/42646416006), **359 passed, 1 warning**, PostgreSQL 16, 92.52 seconds.
 - Frontend CI: [run 42628470610](https://github.com/Pincodenovin13/m369-support/actions/runs/42628470610), success for the frontend source snapshot at commit `455d5b2c`. Frontend source was not changed after that run in the commits through audited HEAD.
 
@@ -73,4 +73,5 @@ The CI result is not a production security certification. Remaining verification
 1. Change GitHub default branch to the active integration branch after branch-protection review.
 2. Decide whether to disable/replace automatic lockfile mutation.
 3. Add a repository-wide CI/docs-link/structure consistency check.
+4. Keep the deployment operations guide aligned with the final production topology and actual provider.
 4. Continue the separate route-by-route application security audit.
