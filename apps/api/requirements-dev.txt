@@ -24,4 +24,4 @@ mypy==1.14.0
 pyyaml==6.0.2
 
 # Fake Redis for rate-limit tests (no real Redis needed in CI)
-fakeredis==2.34.1
+fakeredis[lua]==2.34.1
