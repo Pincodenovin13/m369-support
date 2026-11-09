@@ -38,46 +38,47 @@ export default function DashboardPage() {
         description={`You are signed in to ${agency.name} (${agency.slug}).`}
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-sm text-gray-500">Your role</div>
-          <div className="mt-1 text-lg font-semibold text-gray-900">
+      <div className="mb-7 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Your role</div>
+          <div className="mt-3 text-xl font-extrabold capitalize tracking-tight text-slate-900">
             {user.memberships.find((m) => m.agency_id === agency.id)?.role || "agent"}
           </div>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-sm text-gray-500">Workspaces</div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Workspaces</div>
           <div className="mt-1 text-lg font-semibold text-gray-900">{workspaces.length}</div>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-sm text-gray-500">Agency status</div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Agency status</div>
           <div className="mt-1 text-lg font-semibold text-gray-900">
             {agency.is_active ? "Active" : "Inactive"}
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200">
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h2 className="text-sm font-semibold text-gray-900">Workspaces</h2>
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-5 py-4">
+          <h2 className="text-sm font-extrabold text-slate-900">Your workspaces</h2>
+          <p className="mt-1 text-xs text-slate-500">Spaces available inside this agency</p>
         </div>
         {wsLoading ? (
           <Loading label="Loading workspaces..." />
         ) : wsError ? (
           <ErrorState message={wsError} />
         ) : workspaces.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-gray-500">No workspaces yet.</div>
+          <div className="px-5 py-8 text-sm text-slate-500">No workspaces yet.</div>
         ) : (
-          <ul className="divide-y divide-gray-200">
+          <ul className="divide-y divide-slate-100">
             {workspaces.map((ws) => (
-              <li key={ws.id} className="px-4 py-3 flex items-center justify-between">
+              <li key={ws.id} className="flex items-center justify-between px-5 py-4 transition-colors hover:bg-slate-50/80">
                 <div>
-                  <div className="text-sm font-medium text-gray-900">{ws.name}</div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-sm font-bold text-slate-800">{ws.name}</div>
+                  <div className="mt-1 text-xs text-slate-500">
                     {ws.slug} · {ws.timezone} · {ws.is_active ? "Active" : "Inactive"}
                   </div>
                 </div>
-                <span className="text-xs text-gray-400">
+                <span className="text-[11px] font-medium text-slate-400">
                   Created {new Date(ws.created_at).toLocaleDateString()}
                 </span>
               </li>
