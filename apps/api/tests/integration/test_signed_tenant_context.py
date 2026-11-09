@@ -109,7 +109,8 @@ def test_all_agency_id_tables_are_forced_and_policy_protected(db_engine):
             rows = cur.fetchall()
             assert rows, "No agency_id tables discovered; schema inventory query is broken"
             discovered = {row[0] for row in rows}
-            expected = set(TENANT_TABLES) | {"agency_notes"}
+            # agencies is tenant-scoped by its primary key `id`, not agency_id.
+            expected = (set(TENANT_TABLES) - {"agencies"}) | {"agency_notes"}
             assert discovered == expected, (
                 "agency_id table inventory drift: "
                 f"missing from security policy inventory={sorted(discovered - expected)}; "
