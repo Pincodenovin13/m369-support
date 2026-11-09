@@ -935,3 +935,52 @@ def test_no_default_admin_or_password_created_by_migration(db_engine):
                 assert h != "" and h is not None
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# H. Explicit cross-scope authentication boundary tests
+# ---------------------------------------------------------------------------
+
+
+def test_agency_owner_token_rejected_by_all_sa_management_read_routes(
+    client: TestClient, agency_a
+):
+    """A valid ordinary agency owner JWT must never authorize Super Admin APIs."""
+    agency, _owner, agency_token = agency_a
+    paths = [
+        "/api/v1/super-admin/agencies",
+        "/api/v1/super-admin/plans",
+        "/api/v1/super-admin/subscriptions",
+        "/api/v1/super-admin/payments",
+        "/api/v1/super-admin/platform-settings",
+        "/api/v1/super-admin/audit-logs",
+        "/api/v1/super-admin/auth/me",
+        f"/api/v1/super-admin/agencies/{agency.id}/notes",
+    ]
+    for path in paths:
+        response = client.get(path, headers=_h(agency_token))
+        assert response.status_code == 401, (
+            f"ordinary agency owner token reached {path}: "
+            f"{response.status_code} {response.text}"
+        )
+
+
+def test_super_admin_token_rejected_by_tenant_api_routes(
+    client: TestClient, sa_token
+):
+    """A Super Admin JWT is not an agency membership token and cannot enter tenant APIs."""
+    paths = [
+        "/api/v1/workspaces",
+        "/api/v1/teams",
+        "/api/v1/contacts",
+        "/api/v1/conversations",
+        "/api/v1/messages",
+        "/api/v1/channels",
+        "/api/v1/canned-responses",
+    ]
+    for path in paths:
+        response = client.get(path, headers=_h(sa_token))
+        assert response.status_code == 401, (
+            f"Super Admin token crossed into tenant route {path}: "
+            f"{response.status_code} {response.text}"
+        )
