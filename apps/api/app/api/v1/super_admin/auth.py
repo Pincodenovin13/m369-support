@@ -80,11 +80,11 @@ def _ip(request: Request) -> str | None:
 
 
 def _generic_login_error() -> HTTPException:
-    """Return the same error for unknown email AND wrong password.
+    """Return the same error for unknown, wrong-password, inactive, and locked accounts.
 
-    This is critical: if the error message differs (e.g. "user not found"
-    vs "wrong password"), an attacker can enumerate valid emails.
-    The response is identical in both cases: 401, "Incorrect email or password".
+    This is critical: differing status codes or messages let an attacker
+    enumerate valid emails or infer account state. The response is always
+    401, "Incorrect email or password".
     """
     return HTTPException(status_code=401, detail="Incorrect email or password")
 
@@ -117,7 +117,7 @@ def login(
       1. Fail-closed Redis check (production only).
       2. Rate limit check (per-IP + per-account, independent, Redis-based).
       3. Look up the SuperAdmin by email (case-insensitive).
-      4. If the account is currently locked → 423 Locked.
+      4. If the account is currently locked → the same generic 401 response.
       5. Verify password. On mismatch:
          - Record failed login (atomic counter increment)
          - Return the SAME error as if the email didn't exist (no enumeration)
