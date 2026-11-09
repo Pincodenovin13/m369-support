@@ -61,8 +61,8 @@ apps/web/
 
 | Check | Status |
 |---|---|
-| `npm run type-check` (`tsc --noEmit`) | ✅ Independently verified PASS (2026-11-08) |
-| `npm run lint` (`next lint`) | Z.ai-reported PASS, not independently verified |
+| `npm run type-check` (`tsc --noEmit`) | ✅ GitHub Actions PASS (2026-11-09) |
+| `npm run lint` (`eslint src --ext .ts,.tsx`) | ✅ GitHub Actions PASS (2026-11-09) |
 | `npm run build` (`next build`) | CI-enforced on every frontend change |
 | Frontend test suite | ❌ NOT IMPLEMENTED — Phase 1 has no frontend tests |
 
