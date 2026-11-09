@@ -5,7 +5,7 @@
 
 ## Project Status
 
-**Current engineering branch:** `refactor/repository-structure-unification` (HEAD `ce3d54a2df13494ee914bea2f0677dd11f736a0c`). The latest API/PostgreSQL GitHub Actions run on this exact commit completed successfully: **359 passed, 1 warning**. This is CI evidence, not production security certification. See [`STATE.md`](./STATE.md) for current evidence and limitations.
+**Current engineering branch:** `refactor/repository-structure-unification` (HEAD `77c7371c5351d68673b0a4c32bf51bad352f3b85` (documentation reconciliation commit; application code remains at tested parent snapshot)). The latest API/PostgreSQL GitHub Actions run on this exact commit completed successfully: **359 passed, 1 warning**. This is CI evidence, not production security certification. See [`STATE.md`](./STATE.md) for current evidence and limitations.
 
 - **Current state:** See [`STATE.md`](./STATE.md) for completed packages, commit references, test status, blockers, and next steps.
 - **Repository structure:** See [`REPOSITORY_MAP.md`](./REPOSITORY_MAP.md) for the authoritative file/folder responsibility map.
@@ -109,7 +109,7 @@ See [`docs/README.md`](./docs/README.md) for the full documentation index. Key d
 
 ## Testing
 
-Test results use strict evidence labels. Latest API/PostgreSQL CI: [run 42646416006](https://github.com/Pincodenovin13/m369-support/actions/runs/42646416006) — **359 passed, 1 warning**, exact commit `ce3d54a2df13494ee914bea2f0677dd11f736a0c`. Latest frontend CI: [run 42628470610](https://github.com/Pincodenovin13/m369-support/actions/runs/42628470610) — success on the current frontend code snapshot. Production Redis, deployment topology, and persistent production database remain unverified.
+Test results use strict evidence labels. Latest API/PostgreSQL CI: [run 42646416006](https://github.com/Pincodenovin13/m369-support/actions/runs/42646416006) — **359 passed, 1 warning**, tested application commit `ce3d54a2df13494ee914bea2f0677dd11f736a0c` (current HEAD adds documentation only). Latest frontend CI: [run 42628470610](https://github.com/Pincodenovin13/m369-support/actions/runs/42628470610) — success on the current frontend code snapshot. Production Redis, deployment topology, and persistent production database remain unverified.
 
 ```bash
 cd apps/api && pytest -q tests

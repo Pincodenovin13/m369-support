@@ -1,7 +1,7 @@
 # Contributing to M369 Support
 
 > **Status:** Permanent development rules. Every contributor (human or AI agent) must follow these rules. Violations block merge.
-> **Last updated:** 2026-11-08
+> **Last updated:** 2026-11-09
 
 This document defines the canonical Git workflow, branch strategy, commit conventions, PR requirements, file placement rules, artifact disclosure (Rule 13), and security review process for M369 Support.
 

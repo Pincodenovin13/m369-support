@@ -7,7 +7,7 @@
 > **NOT the current source of truth** for the M369 Support project.
 >
 > - For current project state: see [`/STATE.md`](../../STATE.md)
-> - For current architecture: see [`/ARCHITECTURE.md`](../../ARCHITECTURE.md) (when created)
+> - For current architecture: see [`/docs/architecture/overview.md`](../../docs/architecture/overview.md)
 > - For current file map: see [`/REPOSITORY_MAP.md`](../../REPOSITORY_MAP.md)
 > - For current development rules: see [`/CONTRIBUTING.md`](../../CONTRIBUTING.md)
 >
