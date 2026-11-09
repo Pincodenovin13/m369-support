@@ -4,11 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { Loading, ErrorState, EmptyState, PageHeader } from "@/components/ui";
-import { teamApi, type TeamOut, type TeamMembershipOut, type PaginatedResponse } from "@/lib/api-client";
+import { teamApi, workspaceApi, type TeamOut, type TeamMembershipOut, type PaginatedResponse, type WorkspaceOut } from "@/lib/api-client";
 
 export default function TeamsPage() {
   const { user, agency, loading, error, refresh } = useAuth();
   const [teams, setTeams] = useState<TeamOut[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceOut[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [membersByTeam, setMembersByTeam] = useState<Record<string, TeamMembershipOut[]>>({});
@@ -19,11 +22,18 @@ export default function TeamsPage() {
 
   const loadTeams = useCallback(async () => {
     if (!user) return;
+    if (!selectedWorkspaceId) {
+      setTeams([]);
+      setMembersByTeam({});
+      setMemberErrors({});
+      setListLoading(false);
+      return;
+    }
     setListLoading(true);
     setListError(null);
     try {
-      const res = await teamApi.list({ limit: 50 });
-      const items = (res as PaginatedResponse<TeamOut>).items;
+      const res = await teamApi.list({ limit: 50, workspace_id: selectedWorkspaceId });
+      const items = res.items;
       setTeams(items);
       const memberMap: Record<string, TeamMembershipOut[]> = {};
       const errorMap: Record<string, string> = {};
@@ -45,6 +55,33 @@ export default function TeamsPage() {
     } finally {
       setListLoading(false);
     }
+  }, [user, selectedWorkspaceId]);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    setWorkspaceLoading(true);
+    workspaceApi.list()
+      .then((items) => {
+        if (cancelled) return;
+        setWorkspaces(items);
+        setSelectedWorkspaceId((current) =>
+          current && items.some((workspace) => workspace.id === current)
+            ? current
+            : items[0]?.id ?? ""
+        );
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setListError(err instanceof Error ? err.message : "Failed to load workspaces");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setWorkspaceLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   useEffect(() => {
@@ -53,10 +90,10 @@ export default function TeamsPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!newTeamName.trim() || creating || !teams[0]?.workspace_id) return;
+    if (!newTeamName.trim() || creating || !selectedWorkspaceId) return;
     setCreating(true);
     try {
-      const created = await teamApi.create({ workspace_id: teams[0].workspace_id, name: newTeamName.trim() });
+      const created = await teamApi.create({ workspace_id: selectedWorkspaceId, name: newTeamName.trim() });
       setTeams((prev) => [...prev, created]);
       setMembersByTeam((prev) => ({ ...prev, [created.id]: [] }));
       setNewTeamName("");
@@ -76,18 +113,41 @@ export default function TeamsPage() {
     <DashboardShell user={user} agency={agency}>
       <PageHeader
         title="Teams"
-        description="Teams in your workspace."
+        description="Manage teams and their agency members."
         action={
-          <button
-            onClick={() => setShowCreate(!showCreate)}
-            className="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600"
-          >
-            {showCreate ? "Cancel" : "New team"}
-          </button>
+          user.memberships.some(
+            (membership) =>
+              membership.agency_id === agency.id &&
+              ["owner", "admin", "manager"].includes(membership.role)
+          ) && workspaces.length > 0 ? (
+            <button
+              onClick={() => setShowCreate(!showCreate)}
+              className="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600"
+            >
+              {showCreate ? "Cancel" : "New team"}
+            </button>
+          ) : undefined
         }
       />
+      {workspaces.length > 1 && (
+        <div className="mb-4 max-w-sm">
+          <label htmlFor="team-workspace" className="mb-1 block text-sm font-medium text-gray-700">
+            Workspace
+          </label>
+          <select
+            id="team-workspace"
+            value={selectedWorkspaceId}
+            onChange={(event) => setSelectedWorkspaceId(event.target.value)}
+            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+          >
+            {workspaces.map((workspace) => (
+              <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
       {showCreate && (
-        <form onSubmit={handleCreate} className="mb-4 bg-white rounded-lg border border-gray-200 p-4 flex gap-2">
+        <form onSubmit={handleCreate} className="mb-4 bg-white rounded-lg border border-gray-200 p-4 flex flex-col sm:flex-row gap-2">
           <input
             type="text"
             placeholder="Team name"
@@ -97,7 +157,7 @@ export default function TeamsPage() {
           />
           <button
             type="submit"
-            disabled={creating || !newTeamName.trim()}
+            disabled={creating || !newTeamName.trim() || !selectedWorkspaceId}
             className="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600 disabled:opacity-50"
           >
             {creating ? "Creating..." : "Create"}
@@ -105,7 +165,7 @@ export default function TeamsPage() {
         </form>
       )}
       <div className="bg-white rounded-lg border border-gray-200">
-        {listLoading ? (
+        {workspaceLoading || listLoading ? (
           <Loading label="Loading teams..." />
         ) : listError ? (
           <ErrorState message={listError} />
