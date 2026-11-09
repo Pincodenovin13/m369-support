@@ -17,10 +17,10 @@ export default function SuperAdminPaymentsPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     tokenAmount: "",
-    paidCurrency: "USDT",
-    decimals: "6",
-    exchangeRate: "1",
-    network: "TRC20",
+    paidCurrency: "",
+    decimals: "",
+    exchangeRate: "",
+    network: "",
     note: "",
     failureReason: "",
   });
@@ -51,10 +51,10 @@ export default function SuperAdminPaymentsPage() {
     setMode(action);
     setForm({
       tokenAmount: "",
-      paidCurrency: payment.paid_currency || "USDT",
-      decimals: String(payment.paid_amount_decimals ?? 6),
-      exchangeRate: String(payment.exchange_rate ?? 1),
-      network: payment.network || "TRC20",
+      paidCurrency: payment.paid_currency || "",
+      decimals: payment.paid_amount_decimals == null ? "" : String(payment.paid_amount_decimals),
+      exchangeRate: payment.exchange_rate == null ? "" : String(payment.exchange_rate),
+      network: payment.network || "",
       note: "",
       failureReason: "",
     });
@@ -167,7 +167,7 @@ export default function SuperAdminPaymentsPage() {
                       {mode === "verify" ? (
                         <>
                           <p className="mb-4 text-[11px] leading-5 text-slate-500">
-                            Enter the actual received token amount and the base-currency value of one token at the time of payment. The UI calculates the base amount in cents and the raw token integer for the API audit record.
+                            Enter the actual received token amount and the base-currency value of one token at the time of payment. The API stores the base amount in cents (two decimal places) and the raw token integer for the audit record. No exchange rate, network, or token precision is assumed.
                           </p>
                           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                             <label className="text-[10px] font-bold text-slate-600">Received amount
