@@ -76,6 +76,7 @@ services:
       # Uses m369_sa_auth — NO BYPASSRLS, least-privilege. Used ONLY by
       # /super-admin/auth/login and /super-admin/auth/login/verify-mfa.
       DATABASE_URL_SUPER_ADMIN_AUTH: postgresql+psycopg://m369_sa_auth:${M369_SA_AUTH_PASSWORD:?M369_SA_AUTH_PASSWORD must be set}@db:5432/m369_support
+      M369_TENANT_CONTEXT_SECRET: ${M369_TENANT_CONTEXT_SECRET:?M369_TENANT_CONTEXT_SECRET must be set}
       REDIS_URL: redis://redis:6379/0
 
       ENVIRONMENT: ${ENVIRONMENT:-development}
