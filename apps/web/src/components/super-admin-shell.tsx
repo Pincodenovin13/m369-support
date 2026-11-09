@@ -139,6 +139,21 @@ export function SuperAdminShell({
             </div>
           </div>
         </header>
+        <nav aria-label="Super Admin mobile navigation" className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-white px-3 py-2 lg:hidden">
+          {NAV.map((item) => {
+            const active = pathname === item.href || (item.href !== "/super-admin" && pathname.startsWith(item.href));
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                className={`shrink-0 rounded-lg px-3 py-2 text-[10px] font-bold transition ${active ? "bg-brand-500 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
         {error && <div role="alert" className="mx-4 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700 sm:mx-6 lg:mx-8">{error}</div>}
         <main className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-9">
           {children}
