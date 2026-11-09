@@ -111,7 +111,7 @@ export default function SuperAdminOverviewPage() {
             {data.recentAgencies.map((agency) => (
               <Link
                 key={agency.id}
-                href={`/super-admin/agencies?selected=${agency.id}`}
+                href="/super-admin/agencies"
                 className="flex items-center justify-between gap-4 px-5 py-4 transition hover:bg-slate-50"
               >
                 <div className="flex min-w-0 items-center gap-3">
