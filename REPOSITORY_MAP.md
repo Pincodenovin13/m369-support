@@ -55,7 +55,7 @@ m369-support/
 | `apps/api/app/services/` | Business logic (stateless functions) | `audit.py:write_audit`, `billing.py`, `rate_limit.py`, `sa_auth.py` | Domain logic, atomic DB updates, Redis calls | Route handlers |
 | `apps/api/app/tenancy/` | Tenant context primitives | `context.py:TenantContext`, `set_tenant_context`, `clear_tenant_context`, `TenantOwned` mixin | Tenant GUC management, tenant-owned mixin | Middleware, business logic |
 | `apps/api/app/slugs.py` | Slug utility for unique URL-safe names | `unique_slug()` | Slug generation only | Anything else |
-| `apps/api/migrations/` | Alembic config + migrations | `env.py`, `versions/0001_initial.py` through `0016_extend_login_helper_with_agency_name.py` | Schema migrations only (no data migrations in Phase 1) | Application code |
+| `apps/api/migrations/` | Alembic config + migrations | `env.py`, `versions/0001_initial.py` through `0018_workspace_agency_fks_contacts_teams.py` | Schema migrations and explicitly validated data backfills | Application code |
 | `apps/api/scripts/` | Operational scripts | `create_super_admin.py`, `provision_sa_auth_role.py` | One-off provisioning + admin scripts | Tests, application code |
 | `apps/api/tests/` | Test suite | `conftest.py`, `unit/`, `integration/` | Tests only | Application code, scripts |
 | `apps/api/Dockerfile` | API container image | — | Build + runtime for API service | Frontend, widget |
@@ -70,7 +70,7 @@ m369-support/
 |---|---|
 | Backend source files (`apps/api/app/**/*.py`) | 58 |
 | Backend test/support Python files (`apps/api/tests/**/*.py`) | 24 |
-| Static test function count | 346 (NOT independently verified — see STATE.md) |
+| Static test function count | 350 (346 prior count + 4 new tests; not re-counted — see STATE.md) |
 | Migrations | 18 (0001–0018, linear chain) |
 | Database tables | 25 (14 in `models/__init__.py` + 11 in `models/phase1_extended.py`) |
 | API endpoints | 64 (verified via `grep -rhE '@router\.(get\|post\|put\|patch\|delete)'`) |

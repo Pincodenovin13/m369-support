@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-11-09 — tenant-isolation review and two corrective migrations
 > **Canonical development branch:** `phase-1/foundation`
-> **Current working branch:** `refactor/repository-structure-unification` (HEAD: `94381f30912f51feb0b2b9dd54c8d7628d54c058`)
+> **Current working branch:** `refactor/repository-structure-unification` (HEAD: `896bc3d684c39c0ae588b89c49494c19fb79c73c`)
 > **Recovery branch:** `recovery/zai-workspace-2026-11-08` (HEAD: `1c3294154b41e051855613416f0bc68c3901d125`)
 > **Tracked files:** 179 (was 168 at start of this task)
 > **Migration head (filesystem):** `0018_workspace_agency_fks_contacts_teams` (18 migrations, linear chain)
@@ -75,9 +75,9 @@ All test results below are **reported by Z.ai** (the implementation agent) from 
 
 | Metric | Value | Verification |
 |---|---|---|
-| Backend test files | 18 (3 unit + 15 integration) | INDEPENDENTLY VERIFIED (file count via `git ls-tree`) |
+| Backend test files | 20 (3 unit + 17 integration) | Current tracked tree count; includes 2 newly added integration files |
 | Backend test functions (static count) | 346 | INDEPENDENTLY VERIFIED (count via `grep -rE 'def test_' \| wc -l`) |
-| Backend test execution | 346 passing, 0 failing | Z.ai-REPORTED ONLY — NOT independently verified (sandbox lacks sqlalchemy, psycopg2, pgserver) |
+| Backend test execution | 346 prior tests reported passing; 4 new tests not run | Prior result is Z.ai-reported only; new tests require PostgreSQL execution |
 | Frontend type-check (`tsc --noEmit`) | PASS (exit 0) | ✅ INDEPENDENTLY VERIFIED (2026-11-08, after frontend buildout) |
 | Frontend build (`next build`) | PASS | Z.ai-REPORTED ONLY |
 | Frontend lint (`next lint`) | PASS | Z.ai-REPORTED ONLY |
@@ -113,6 +113,7 @@ All test results below are **reported by Z.ai** (the implementation agent) from 
 | P0-2 | No independent verification of 346 backend tests | Critical | Z.ai-reported only |
 | P0-3 | No security headers (HSTS, X-Content-Type-Options, CSP, etc.) | Critical | `apps/api/app/main.py` registers only CORS + TenantContext middlewares |
 | P0-4 | No request body size limits | Critical | No `max_request_size` enforcement |
+| P0-5 | Tenant identity uses user-settable `app.tenant_id` custom GUC | Critical | RLS does not prevent arbitrary SQL under shared `m369_app` from spoofing tenant context; signed-context or per-tenant DB identity hardening required before production |
 | P1-1 | Agency `User` accounts have no DB-side lockout (only Redis rate limit) | Important | Asymmetric with Super Admin |
 | P1-2 | No email verification flow | Important | Zero `email_verif*` references |
 | P1-3 | Password policy is length-only (10/12 chars) | Important | No complexity rules |
