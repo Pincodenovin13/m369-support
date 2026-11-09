@@ -32,11 +32,15 @@ def tenant_context_signature(agency_id: uuid.UUID | str, secret: str | None = No
         raise RuntimeError("M369_TENANT_CONTEXT_SECRET must contain at least 32 UTF-8 bytes")
     return hmac.new(key.encode("utf-8"), (_DOMAIN + normalized).encode("utf-8"), hashlib.sha256).hexdigest()
 
-def set_tenant_context(db: Session, agency_id: uuid.UUID | str) -> None:
+def set_tenant_context(db: Session, agency_id: uuid.UUID | str, *, persist: bool = False) -> None:
     normalized = str(uuid.UUID(str(agency_id)))
     signature = tenant_context_signature(normalized)
-    db.info["tenant_id"] = normalized
-    db.info["tenant_signature"] = signature
+    if persist:
+        db.info["tenant_id"] = normalized
+        db.info["tenant_signature"] = signature
+    else:
+        db.info.pop("tenant_id", None)
+        db.info.pop("tenant_signature", None)
     db.execute(text("SELECT pg_catalog.set_config(:k1,:v1,true), pg_catalog.set_config(:k2,:v2,true)"),
                {"k1": TENANT_GUC, "v1": normalized, "k2": TENANT_SIGNATURE_GUC, "v2": signature})
 

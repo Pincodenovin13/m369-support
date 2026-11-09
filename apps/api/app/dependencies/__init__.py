@@ -126,7 +126,7 @@ def get_current_user(
 
     # Apply the signed tenant context; raw tenant GUCs are never trusted.
     if ctx.agency_id is not None:
-        set_tenant_context(db, ctx.agency_id)
+        set_tenant_context(db, ctx.agency_id, persist=True)
     return user
 
 
