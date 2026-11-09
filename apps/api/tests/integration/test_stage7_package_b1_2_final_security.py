@@ -23,6 +23,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session as SASession
 
 from app.core.config import get_settings
+from app.tenancy.context import set_tenant_context
 
 
 pytestmark = [pytest.mark.security, pytest.mark.integration]
@@ -190,7 +191,7 @@ def test_REG_06_concurrent_registration_one_succeeds(setup_session, monkeypatch)
 
                 # Insert agency
                 aid = uuid.uuid4()
-                session.execute(text(f"SET LOCAL app.tenant_id = '{aid}'"))
+                set_tenant_context(session, aid)
                 session.execute(text(
                     f"INSERT INTO agencies (id, name, slug, brand_color, is_active) "
                     f"VALUES ('{aid}', 'Concurrent {key}', 'concurrent-{key}-{aid.hex[:6]}', '#FF6B35', true)"
@@ -199,7 +200,7 @@ def test_REG_06_concurrent_registration_one_succeeds(setup_session, monkeypatch)
                 results[key] = "success"
             except Exception:
                 session.rollback()
-                results[key] = "error"
+                results[key] = f"error:{type(exc).__name__}:{exc}"
 
     # Use m369_app connections (RLS-enforced) — both threads try to register
     t1 = threading.Thread(target=_register, args=(
@@ -535,60 +536,35 @@ def test_DEFAULT_03_sa_runner_explicit_grants_intact(setup_session):
 # ===========================================================================
 
 
-def test_MIG_01_upgrade_downgrade_reupgrade():
-    """MIG-01: Migration 0013 upgrade → downgrade → re-upgrade."""
+def test_MIG_01_unsafe_downgrade_is_refused_and_schema_is_preserved():
+    """The signed-RLS migration must refuse downgrade to forgeable tenant GUC policies."""
     api_dir = Path(__file__).resolve().parents[2]
     env = {**os.environ, "DATABASE_URL": SETUP_DB_URL}
 
-    # Ensure at head
-    r0 = subprocess.run(["alembic", "upgrade", "head"], cwd=str(api_dir),
-                        capture_output=True, text=True, env=env)
-    assert r0.returncode == 0, f"upgrade failed: {r0.stderr}"
+    upgrade = subprocess.run(["alembic", "upgrade", "head"], cwd=str(api_dir),
+                             capture_output=True, text=True, env=env)
+    assert upgrade.returncode == 0, f"upgrade failed: {upgrade.stderr}"
 
-    # Downgrade to 0012 (0014 → 0013 → 0012)
-    # This crosses migration 0013's downgrade, which drops the guard function.
-    r1 = subprocess.run(["alembic", "downgrade", "0012_package_b1_critical_corrections"], cwd=str(api_dir),
-                        capture_output=True, text=True, env=env)
-    assert r1.returncode == 0, f"downgrade failed: {r1.stderr}"
+    downgrade = subprocess.run(
+        ["alembic", "downgrade", "0018_workspace_agency_fks_contacts_teams"],
+        cwd=str(api_dir), capture_output=True, text=True, env=env,
+    )
+    assert downgrade.returncode != 0, "unsafe downgrade unexpectedly succeeded"
+    assert "Unsafe downgrade refused" in downgrade.stderr
 
-    # Verify guard function is gone
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT COUNT(*) FROM pg_proc p
-                JOIN pg_namespace n ON n.oid = p.pronamespace
-                WHERE p.proname = 'is_initial_agency_registration_open'
-                AND n.nspname = 'public'
-            """)
-            assert cur.fetchone()[0] == 0, "Guard function still exists after downgrade"
+            cur.execute("SELECT version_num FROM alembic_version")
+            assert cur.fetchone()[0] == "0019_signed_tenant_context_rls"
+            cur.execute("SELECT COUNT(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='m369_current_tenant_id'")
+            assert cur.fetchone()[0] == 1, "signed tenant verifier disappeared after refused downgrade"
     finally:
         conn.close()
 
-    # Re-upgrade
-    r2 = subprocess.run(["alembic", "upgrade", "head"], cwd=str(api_dir),
-                        capture_output=True, text=True, env=env)
-    assert r2.returncode == 0, f"re-upgrade failed: {r2.stderr}"
-
-    # Verify guard function is back
-    conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT COUNT(*) FROM pg_proc p
-                JOIN pg_namespace n ON n.oid = p.pronamespace
-                WHERE p.proname = 'is_initial_agency_registration_open'
-                AND n.nspname = 'public'
-            """)
-            assert cur.fetchone()[0] == 1, "Guard function missing after re-upgrade"
-    finally:
-        conn.close()
-
-    # Dispose engines to clear stale connections
-    from app.db.database import engine, super_admin_engine, super_admin_auth_engine
-    engine.dispose()
-    super_admin_engine.dispose()
-    super_admin_auth_engine.dispose()
+    reupgrade = subprocess.run(["alembic", "upgrade", "head"], cwd=str(api_dir),
+                               capture_output=True, text=True, env=env)
+    assert reupgrade.returncode == 0, f"idempotent re-upgrade failed: {reupgrade.stderr}"
 
 
 def test_MIG_02_existing_data_preserved(setup_session):
@@ -601,7 +577,7 @@ def test_MIG_02_existing_data_preserved(setup_session):
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0016_extend_login_helper_with_agency_name", f"head is {v}"
+            assert v == "0019_signed_tenant_context_rls", f"head is {v}"
     finally:
         conn.close()
 
