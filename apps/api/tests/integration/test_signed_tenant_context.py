@@ -55,6 +55,60 @@ def test_unsigned_and_tampered_tenant_gucs_fail_closed(db_engine, setup_session)
         conn.rollback()
 
 
+def test_signed_tenant_a_cannot_insert_rows_for_tenant_b(db_engine, setup_session):
+    """WITH CHECK must reject a validly signed A session inserting a B-owned row."""
+    agency_a, agency_b = uuid.uuid4(), uuid.uuid4()
+    workspace_a, workspace_b = uuid.uuid4(), uuid.uuid4()
+    setup_session.execute(
+        text("INSERT INTO agencies (id,name,slug,brand_color,is_active) "
+             "VALUES (:id,:name,:slug,'#123456',true)"),
+        [
+            {"id": agency_a, "name": "Insert A", "slug": f"insert-a-{agency_a.hex}"},
+            {"id": agency_b, "name": "Insert B", "slug": f"insert-b-{agency_b.hex}"},
+        ],
+    )
+    setup_session.execute(
+        text("INSERT INTO workspaces (id,agency_id,name,slug,timezone,is_active) "
+             "VALUES (:id,:agency_id,:name,:slug,'UTC',true)"),
+        [
+            {"id": workspace_a, "agency_id": agency_a, "name": "Workspace A", "slug": f"ws-a-{workspace_a.hex}"},
+            {"id": workspace_b, "agency_id": agency_b, "name": "Workspace B", "slug": f"ws-b-{workspace_b.hex}"},
+        ],
+    )
+    setup_session.commit()
+
+    allowed_contact, forbidden_contact = uuid.uuid4(), uuid.uuid4()
+    with psycopg.connect(APP_DB_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT set_config('app.tenant_id', %s, true)", (str(agency_a),))
+            cur.execute(
+                "SELECT set_config('app.tenant_sig', %s, true)",
+                (tenant_context_signature(agency_a),),
+            )
+
+            # Positive control: signed tenant A can insert its own row.
+            cur.execute(
+                "INSERT INTO contacts (id,workspace_id,agency_id,name,email) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                (allowed_contact, workspace_a, agency_a, "Allowed A", f"{allowed_contact.hex}@a.test"),
+            )
+
+            # Negative control: the same signed A context cannot create a B-owned row.
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                cur.execute(
+                    "INSERT INTO contacts (id,workspace_id,agency_id,name,email) "
+                    "VALUES (%s,%s,%s,%s,%s)",
+                    (forbidden_contact, workspace_b, agency_b, "Forbidden B", f"{forbidden_contact.hex}@b.test"),
+                )
+        conn.rollback()
+
+    # Verify no forbidden row survived the failed transaction.
+    with psycopg.connect(APP_DB_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM contacts WHERE id=%s", (forbidden_contact,))
+            assert cur.fetchone()[0] == 0
+
+
 def test_every_tenant_table_has_one_forced_signed_policy(db_engine):
     with psycopg.connect(APP_DB_URL) as conn:
         with conn.cursor() as cur:
