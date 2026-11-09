@@ -430,6 +430,9 @@ def mfa_enable(
         raise HTTPException(status_code=401, detail="Super Admin not found")
     if admin.mfa_enabled:
         raise HTTPException(status_code=409, detail="MFA is already enabled")
+    # A stolen authenticated session must not be able to brute-force the
+    # six-digit enrollment proof. Share the dedicated MFA IP/account quota.
+    check_verify_mfa_rate_limit(request, sa_id)
     s = get_settings()
     totp = pyotp.TOTP(payload.secret, digits=s.totp_digits, interval=s.totp_step_seconds)
     if not totp.verify(payload.code, valid_window=s.totp_window):
@@ -458,6 +461,8 @@ def mfa_disable(
         raise HTTPException(status_code=401, detail="Super Admin not found")
     if not admin.mfa_enabled:
         raise HTTPException(status_code=409, detail="MFA is not enabled")
+    # Require throttling for TOTP and recovery-code checks on MFA disable too.
+    check_verify_mfa_rate_limit(request, sa_id)
     if payload.recovery_code:
         sa_auth.consume_recovery_code(db, admin=admin, code=payload.recovery_code, ip=_ip(request))
     elif payload.code:
