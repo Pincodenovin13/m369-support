@@ -155,10 +155,9 @@ def login(
                     ip_address=_ip(request),
                 ))
                 db.commit()
-                raise HTTPException(
-                    status_code=423,
-                    detail="Account temporarily locked. Try again later.",
-                )
+                # Do not disclose whether an email belongs to a locked account.
+                # Match the response used for unknown-user and wrong-password failures.
+                raise _generic_login_error()
 
     # 5. Verify password — SAME error for unknown email AND wrong password
     password_ok = (
