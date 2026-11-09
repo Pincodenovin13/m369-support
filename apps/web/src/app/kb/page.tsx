@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { Loading, ErrorState, EmptyState, PageHeader } from "@/components/ui";
-import { kbApi, ApiError, type KBArticleOut, type KBCategoryOut, type PaginatedResponse } from "@/lib/api-client";
+import { kbApi, type KBArticleOut, type KBCategoryOut, type PaginatedResponse } from "@/lib/api-client";
 
 export default function KBPage() {
   const { user, agency, loading, error, refresh } = useAuth();
