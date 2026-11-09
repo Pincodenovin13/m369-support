@@ -231,7 +231,7 @@ def test_6_correct_password_during_lockout_rejected(client: TestClient, setup_se
     )
     unknown = client.post(
         "/api/v1/super-admin/auth/login",
-        json={"email": f"missing-{uuid.uuid4().hex}@example.invalid", "password": "correct-password-123"},
+        json={"email": f"missing-{uuid.uuid4().hex}@example.com", "password": "correct-password-123"},
     )
     assert locked.status_code == 401, f"expected generic 401, got {locked.status_code}: {locked.text}"
     assert locked.json() == unknown.json(), (
