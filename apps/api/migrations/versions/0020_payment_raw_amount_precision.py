@@ -31,6 +31,11 @@ def upgrade() -> None:
         existing_nullable=True,
         postgresql_using="paid_amount_raw::numeric(78,0)",
     )
+    op.create_check_constraint(
+        "ck_payments_raw_amount_nonneg",
+        "payments",
+        "paid_amount_raw IS NULL OR paid_amount_raw >= 0",
+    )
 
 
 def downgrade() -> None:
@@ -52,6 +57,7 @@ def downgrade() -> None:
         $$;
         """
     )
+    op.drop_constraint("ck_payments_raw_amount_nonneg", "payments", type_="check")
     op.alter_column(
         "payments",
         "paid_amount_raw",
