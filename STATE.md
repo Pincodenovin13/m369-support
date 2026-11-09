@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-11-09 — signed tenant-context RLS hardening verified in PostgreSQL 16 CI
 > **Canonical development branch:** `phase-1/foundation`
-> **Current working branch:** `refactor/repository-structure-unification` (HEAD: `d901887b6d8e0d80eb7015693e3be287157f8c3a`)
+> **Current working branch:** `refactor/repository-structure-unification` (HEAD: `c7feb2d4788ca07827c073ee10755c39e8dbadb6`)
 > **Recovery branch:** `recovery/zai-workspace-2026-11-08` (HEAD: `1c3294154b41e051855613416f0bc68c3901d125`)
 > **Tracked files:** 182
 > **Migration head (filesystem):** `0019_signed_tenant_context_rls` (19 migrations, linear chain)
@@ -149,6 +149,8 @@ Historical package test results below are labeled by their original source. The 
 |---|---|---|
 | `d9d945c` | Migration 0017 revokes schema CREATE from `m369_app` and PUBLIC; bootstrap grants USAGE only to runtime roles | Committed and fetched back from GitHub; PostgreSQL test not run here |
 | `94381f3` | Migration 0018 adds composite workspace/agency FKs for `contacts` and `teams`, after fail-closed data validation | Committed; included in the later PostgreSQL 16 migration run |
+| `d901887` | Migration 0019 adds HMAC-signed tenant context; all 16 tenant tables use the DB verifier; positive/negative tests + PostgreSQL 16 CI | 73 passed, 4 deselected |
+| `c7feb2d` | STATE, REPOSITORY_MAP, and tenant-isolation security documentation updated with the verified closure | Committed and fetched back from GitHub |
 
 Schema-privilege and cross-agency workspace tests were added. The later focused PostgreSQL 16 CI run executes the relevant tenant-isolation and attachment-RLS coverage.
 
@@ -159,7 +161,7 @@ The unsigned-GUC spoofing weakness identified during this audit is addressed by 
 
 ### Signed tenant-context RLS closure — 2026-11-09
 
-Commit at branch HEAD: `d901887b6d8e0d80eb7015693e3be287157f8c3a`.
+RLS implementation commit: `d901887b6d8e0d80eb7015693e3be287157f8c3a`; documentation/current branch HEAD: `c7feb2d4788ca07827c073ee10755c39e8dbadb6`.
 
 - Migration `0019_signed_tenant_context_rls` replaces unsigned GUC policies with `public.m369_current_tenant_id()`, a SECURITY DEFINER verifier using HMAC-SHA256.
 - The verifier reads its key from `m369_private.tenant_context_secret`; the `m369_app` runtime role has no schema/table access to that secret. A separate NOLOGIN, NOBYPASSRLS function-owner role has only the required SELECT privilege.
