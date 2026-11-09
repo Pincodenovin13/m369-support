@@ -39,6 +39,12 @@ The repository-root documents are authoritative. Supplementary documents under `
 |---|---|---|
 | Schema | [schema.md](database/schema.md) | Tables, constraints and migration details |
 
+## Deployment and operations
+
+| Document | Path | Purpose |
+|---|---|---|
+| Production operations | [production-operations.md](deployment/production-operations.md) | Low-cost VPS/domain/DNS/TLS, backups, safe updates, rollback and owner training |
+
 ## Development
 
 | Document | Path | Purpose |
