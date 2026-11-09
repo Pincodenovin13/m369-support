@@ -172,7 +172,7 @@ export default function SuperAdminPlansPage() {
               <input required type="number" min="1" step="1" value={form.max_seats} onChange={(e) => setForm({ ...form, max_seats: e.target.value })} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-brand-400" />
             </label>
             <label className="block">
-              <span className="text-[11px] font-bold text-slate-600">Monthly conversations</span>
+              <span className="text-[11px] font-bold text-slate-600">Conversation limit</span>
               <input required type="number" min="1" step="1" value={form.max_conversations} onChange={(e) => setForm({ ...form, max_conversations: e.target.value })} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-brand-400" />
             </label>
             <label className="block">
