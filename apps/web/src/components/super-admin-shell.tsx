@@ -23,6 +23,7 @@ const NAV = [
   { href: "/super-admin/plans", label: "Plans", icon: Tags },
   { href: "/super-admin/subscriptions", label: "Subscriptions", icon: CreditCard },
   { href: "/super-admin/payments", label: "Payments", icon: ShieldCheck },
+  { href: "/super-admin/security", label: "Security", icon: ShieldCheck },
 ];
 
 function initials(name: string) {
