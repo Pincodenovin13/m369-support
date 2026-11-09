@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { Loading, ErrorState, EmptyState, PageHeader } from "@/components/ui";
-import { teamApi, ApiError, type TeamOut, type TeamMembershipOut, type PaginatedResponse } from "@/lib/api-client";
+import { teamApi, type TeamOut, type TeamMembershipOut, type PaginatedResponse } from "@/lib/api-client";
 
 export default function TeamsPage() {
   const { user, agency, loading, error, refresh } = useAuth();
