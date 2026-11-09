@@ -2,7 +2,7 @@
 
 > Last reconciled: 2026-11-09 (UTC)
 > Active development branch: `refactor/repository-structure-unification`
-> Active HEAD: `77c7371c5351d68673b0a4c32bf51bad352f3b85`
+> Active HEAD: resolve from the live GitHub branch ref; last audited application-code snapshot: `ce3d54a2df13494ee914bea2f0677dd11f736a0c`
 > GitHub default branch: `test/marker` (still a one-file marker branch; NOT the development source of truth)
 > Tracked files on active HEAD: 202
 > Alembic head: `0020_payment_raw_amount_precision` (20 linear migrations)
@@ -22,7 +22,7 @@ The repository currently exposes 12 branches. Comparison of each of the 11 other
 
 | Branch | Tip | Classification |
 |---|---|---|
-| `refactor/repository-structure-unification` | `ce3d54a2` | Active development |
+| `refactor/repository-structure-unification` | Live branch tip (resolve from GitHub) | Active development |
 | `test/marker` | `34d97bf4` | Default branch; one file only; stale |
 | `phase-1/foundation` | `0b3139a1` | Historical checkpoint |
 | `phase-1/agency-auth-integration-closure` | `5fc22ad8` | Historical checkpoint |
