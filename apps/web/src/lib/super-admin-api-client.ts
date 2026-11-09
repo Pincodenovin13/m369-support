@@ -177,11 +177,11 @@ function query(params?: Record<string, string | number | boolean | undefined>): 
 }
 
 function stringifyExact(value: unknown): string {
-  const marker = "__M369_BIGINT__";
+  const marker = "__m369_bigint_literal__";
   const serialized = JSON.stringify(value, (_key, item) =>
-    typeof item === "bigint" ? `${marker}${item.toString()}` : item,
+    typeof item === "bigint" ? { [marker]: item.toString() } : item,
   );
-  return serialized.replace(/"__M369_BIGINT__(-?\d+)"/g, "$1");
+  return serialized.replace(/\{"__m369_bigint_literal__":"(-?\d+)"\}/g, "$1");
 }
 
 export const superAdminAuthApi = {
