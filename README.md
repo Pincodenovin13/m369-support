@@ -5,7 +5,7 @@
 
 ## Project Status
 
-**Current engineering branch:** `refactor/repository-structure-unification`. The latest API/PostgreSQL GitHub Actions run on this exact commit completed successfully: **359 passed, 1 warning**. This is CI evidence, not production security certification. See [`STATE.md`](./STATE.md) for current evidence and limitations.
+**Current engineering branch:** `refactor/repository-structure-unification`. The latest API/PostgreSQL CI run for the current application-code snapshot completed successfully on commit `ce3d54a2df13494ee914bea2f0677dd11f736a0c`: **359 passed, 1 warning**. Later commits on this branch changed documentation only. This is CI evidence, not production security certification. See [`STATE.md`](./STATE.md) for current evidence and limitations.
 
 - **Current state:** See [`STATE.md`](./STATE.md) for completed packages, commit references, test status, blockers, and next steps.
 - **Repository structure:** See [`REPOSITORY_MAP.md`](./REPOSITORY_MAP.md) for the authoritative file/folder responsibility map.
