@@ -435,6 +435,28 @@ def _setup_mfa_for_admin(client: TestClient, token: str) -> tuple[str, list[str]
     return secret, recovery_codes
 
 
+def test_mfa_enrollment_and_disable_are_rate_limited(client: TestClient, setup_session: Session, monkeypatch):
+    """MFA setup proof and MFA disable must both use the dedicated MFA limiter."""
+    admin = _make_sa(setup_session)
+    token = _sa_token(admin)
+    seen = []
+    def record_limit(request, sa_id):
+        seen.append(sa_id)
+    monkeypatch.setattr(
+        "app.api.v1.super_admin.auth.check_verify_mfa_rate_limit",
+        record_limit,
+    )
+    secret, _codes = _setup_mfa_for_admin(client, token)
+    assert seen == [admin.id], "MFA enrollment did not invoke the account/IP limiter"
+    s = get_settings()
+    code = pyotp.TOTP(secret, digits=s.totp_digits, interval=s.totp_step_seconds).now()
+    response = client.post(
+        "/api/v1/super-admin/auth/mfa/disable",
+        headers=_h(token),
+        json={"code": code},
+    )
+    assert response.status_code == 204, response.text
+    assert seen == [admin.id, admin.id], "MFA disable did not invoke the account/IP limiter"
 def test_11_mfa_enabled_no_full_jwt_without_code(client: TestClient, setup_session: Session):
     """Test 11: If MFA is enabled, password alone does NOT issue a full JWT."""
     admin = _make_sa(setup_session, password="correct-password-123")
