@@ -2,23 +2,23 @@
 
 > Last reconciled: 2026-11-09 (UTC)
 > Active development branch: `refactor/repository-structure-unification`
-> Active HEAD: resolve from the live GitHub branch ref; last audited application-code snapshot: `ce3d54a2df13494ee914bea2f0677dd11f736a0c`
+> Active HEAD: resolve from the live GitHub branch ref; latest verified application-code snapshot: `ce3d54a2df13494ee914bea2f0677dd11f736a0c`
 > GitHub default branch: `test/marker` (still a one-file marker branch; NOT the development source of truth)
-> Tracked files on active HEAD: 202
+> Tracked files before current documentation additions: 201 (one obsolete auto-mutating workflow removed)
 > Alembic head: `0020_payment_raw_amount_precision` (20 linear migrations)
 > Production deployment database: NOT inspected
 
 ## 1. Source-of-truth rules
 
 1. The active development source is the exact branch and HEAD named above.
-2. This file is the canonical current-state summary. Historical reports under `recovery/` and old branch snapshots are not implementation instructions.
+2. This file is the canonical current-state summary. Historical reports under `recovery/` and old branch snapshots are not implementation instructions. Exclude `recovery/**` from automated implementation discovery, dependency scans used to determine active architecture, and source imports unless performing explicit forensic review.
 3. Do not develop on `test/marker`, `phase-1/foundation`, or historical checkpoint branches.
 4. Do not delete branches, rewrite published history, force-push, or reapply archived patches as part of routine work.
 5. Any code/schema change must be checked against the current active HEAD, not against a stale local or historical report.
 
 ## 2. Branch topology
 
-The repository currently exposes 12 branches. Comparison of each of the 11 other branch tips against the active HEAD reports the active branch as ahead and behind by zero; each compared branch tip is an ancestor of the active HEAD. This means the visible branch tips are historical checkpoints on the same ancestry line, not currently divergent code lines.
+The repository currently exposes 12 branches (verify live branch list before branch operations). Comparison of each of the 11 other branch tips against the active HEAD reports the active branch as ahead and behind by zero; each compared branch tip is an ancestor of the active HEAD. This means the visible branch tips are historical checkpoints on the same ancestry line, not currently divergent code lines.
 
 | Branch | Tip | Classification |
 |---|---|---|
@@ -119,7 +119,7 @@ See `docs/architecture/future-capabilities-roadmap.md` for the approved planning
 - GitHub default branch is the one-file `test/marker` branch; active code is on the branch stated above.
 - Historical branches remain visible as checkpoints. They are currently ancestors of active HEAD, not divergent lines.
 - Historical `recovery/workspace-preservation/` contains archived OpenLivery references. Its README explicitly marks those files as non-authoritative; do not import or reuse them.
-- `.github/workflows/refresh-web-lockfile.yml` automatically regenerates and commits the web lockfile and runs `npm audit fix` after manifest changes. This is a separate mutation workflow, not the read-only `npm ci` check; review its behavior before treating dependency changes as fully manual.
+- `.github/workflows/refresh-web-lockfile.yml` was removed in commit `6043cfffe0ee4642fc55c4811f6ae87c481ca9ec`. Dependency changes are now explicit, reviewed changes; web CI installs the committed lockfile with `npm ci` and does not mutate/push it.
 - Several documentation files previously contained stale branch, migration, test-count and security claims. They are being reconciled against this state and current CI evidence.
 
 ## 9. Immediate next sequence
