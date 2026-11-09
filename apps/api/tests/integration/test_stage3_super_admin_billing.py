@@ -437,7 +437,7 @@ def test_sa_payment_txid_unique(client: TestClient, setup_session: Session, agen
 
 
 def test_sa_payment_financial_precision_integer_cents(client: TestClient, setup_session: Session, agency_a, sa_token):
-    """All money columns are INTEGER cents — never FLOAT.
+    """Base-currency amounts are INTEGER cents; raw token units are exact integers.
 
     Verify that $19.99 is stored as 1999, not 19.99.
     """
