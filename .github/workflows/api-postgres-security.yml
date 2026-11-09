@@ -4,9 +4,21 @@ on:
   push:
     branches:
       - refactor/repository-structure-unification
+    paths:
+      - "apps/api/**"
+      - "docker-compose.yml"
+      - ".env.example"
+      - ".github/workflows/api-postgres-security.yml"
+      - "docs/security/**"
   pull_request:
     branches:
       - refactor/repository-structure-unification
+    paths:
+      - "apps/api/**"
+      - "docker-compose.yml"
+      - ".env.example"
+      - ".github/workflows/api-postgres-security.yml"
+      - "docs/security/**"
 
 permissions:
   contents: read
