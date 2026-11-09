@@ -79,7 +79,7 @@ export default function KBPage() {
                     </div>
                   </div>
                   <span className="text-xs text-gray-400 ml-4">
-                    Updated {new Date(a.updated_at).toLocaleDateString()}
+                    Created {new Date(a.created_at).toLocaleDateString()}
                   </span>
                 </button>
                 {expandedId === a.id && (
