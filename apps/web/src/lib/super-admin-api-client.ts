@@ -18,6 +18,15 @@ export interface SuperAdminMFARequiredResponse {
   expires_in_seconds: number;
 }
 
+export interface SuperAdminMFASetupResponse {
+  secret: string;
+  otpauth_url: string;
+}
+
+export interface SuperAdminRecoveryCodesOut {
+  recovery_codes: string[];
+}
+
 export type SuperAdminLoginResult = SuperAdminOut | SuperAdminMFARequiredResponse;
 
 export interface AgencyAdminOut {
@@ -168,6 +177,15 @@ export const superAdminAuthApi = {
   },
   logout(): Promise<void> {
     return request("/auth/logout", { method: "POST" });
+  },
+  setupMfa(): Promise<SuperAdminMFASetupResponse> {
+    return request("/auth/mfa/setup", { method: "POST" });
+  },
+  enableMfa(input: { secret: string; code: string }): Promise<SuperAdminRecoveryCodesOut> {
+    return request("/auth/mfa/enable", { method: "POST", body: JSON.stringify(input) });
+  },
+  disableMfa(input: { code?: string; recovery_code?: string }): Promise<void> {
+    return request("/auth/mfa/disable", { method: "POST", body: JSON.stringify(input) });
   },
 };
 
