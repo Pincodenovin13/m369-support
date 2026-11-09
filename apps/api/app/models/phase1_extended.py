@@ -15,7 +15,8 @@ Migration 0006 adds:
 
 All tenant-owned tables carry agency_id for RLS.
 Composite FKs prevent cross-tenant references.
-Money columns use NUMERIC(18,6) — never FLOAT.
+Base-currency amounts use INTEGER cents; exchange rates use NUMERIC(18,6);
+raw blockchain units use NUMERIC(78,0). Never use FLOAT for persisted money.
 """
 from __future__ import annotations
 
@@ -344,8 +345,9 @@ class Subscription(Base, TimestampMixin):
 class Payment(Base, TimestampMixin):
     """Payment transaction. Idempotent — txid is unique.
 
-    All money in NUMERIC(18,6) — never FLOAT.
-    Exchange rate snapshot at transaction time.
+    Base-currency amounts are integer cents. Exchange rates use NUMERIC(18,6),
+    and raw blockchain token units use NUMERIC(78,0) to preserve uint256 precision.
+    No persisted financial amount uses FLOAT.
     """
 
     __tablename__ = "payments"
