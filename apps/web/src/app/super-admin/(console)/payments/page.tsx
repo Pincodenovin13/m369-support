@@ -227,7 +227,7 @@ export default function SuperAdminPaymentsPage() {
                             </label>
                           </div>
                           <div className="mt-3 text-[10px] text-slate-500">
-                            Calculated base amount (cents): {previewBaseAmount(form.tokenAmount, form.decimals, form.exchangeRate, payment.currency)}
+                            Calculated base amount: {previewBaseAmount(form.tokenAmount, form.decimals, form.exchangeRate, payment.currency)}
                           </div>
                         </>
                       ) : (
