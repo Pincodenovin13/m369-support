@@ -448,7 +448,7 @@ def test_mfa_enrollment_and_disable_are_rate_limited(client: TestClient, setup_s
         "app.api.v1.super_admin.auth.check_verify_mfa_rate_limit",
         record_limit,
     )
-    secret, _codes = _setup_mfa_for_admin(client, token)
+    secret, recovery_codes = _setup_mfa_for_admin(client, token)
 
     # Enrollment must revoke the pre-MFA session.
     stale = client.get("/api/v1/super-admin/auth/me", headers=_h(token))
@@ -472,10 +472,12 @@ def test_mfa_enrollment_and_disable_are_rate_limited(client: TestClient, setup_s
     fresh_token = verify_response.cookies.get("super_admin_access_token")
     assert fresh_token
 
+    # Use a recovery code here: the TOTP used for login is intentionally
+    # replay-protected and must not be accepted a second time in the same window.
     response = client.post(
         "/api/v1/super-admin/auth/mfa/disable",
         headers=_h(fresh_token),
-        json={"code": code},
+        json={"recovery_code": recovery_codes[0]},
     )
     assert response.status_code == 204, response.text
     assert seen == [admin.id, admin.id, admin.id], "MFA verify/disable did not invoke the account/IP limiter"
