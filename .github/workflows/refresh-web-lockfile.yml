@@ -41,5 +41,7 @@ jobs:
             echo "Lockfile already matches the manifest."
           else
             git commit -m "chore(web): refresh dependency lockfile"
+            git fetch origin refactor/repository-structure-unification
+            git rebase origin/refactor/repository-structure-unification
             git push origin HEAD:refactor/repository-structure-unification
           fi
