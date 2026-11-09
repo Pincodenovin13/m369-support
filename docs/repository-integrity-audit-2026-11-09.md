@@ -27,7 +27,7 @@ Audited HEAD: `ce3d54a2df13494ee914bea2f0677dd11f736a0c`
 - 20 Alembic migration files, ending at `0020_payment_raw_amount_precision`.
 - 31 frontend source files under `apps/web/src/`.
 - 19 Next.js App Router `page.tsx` files.
-- Widget and shared package are placeholders, not working packages.
+- Widget and shared package are placeholders, not working packages. No worker/queue implementation or worker directory exists.
 - Repeated basenames exist in separate module paths. They are not duplicate files unless imports/build manifests show the same implementation copied into multiple locations.
 
 ### 3. Confirmed stale or contradictory documentation
@@ -73,5 +73,5 @@ The CI result is not a production security certification. Remaining verification
 1. Change GitHub default branch to the active integration branch after branch-protection review.
 2. Decide whether to disable/replace automatic lockfile mutation.
 3. Add a repository-wide CI/docs-link/structure consistency check.
-4. Keep the deployment operations guide aligned with the final production topology and actual provider.
+4. Keep the deployment operations guide aligned with the final production topology and actual provider.\n5. Implement a production-only Compose/release configuration; current Compose is local-development only and must not be deployed unchanged.
 4. Continue the separate route-by-route application security audit.
