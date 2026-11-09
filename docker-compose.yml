@@ -1,0 +1,123 @@
+# M369 Support — local development Docker Compose
+# Starts PostgreSQL 16, Redis 7, a migration runner, and the API container.
+# Frontend runs natively (npm run dev) for fast HMR.
+#
+# SECURITY: The API service only receives DATABASE_URL (m369_app).
+# The migration service receives the postgres credential.
+# No env_file is used for migration or api — all vars are explicit.
+# No privileged credential is available to the API process.
+
+name: m369-support
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: m369_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: m369_support
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      M369_APP_PASSWORD: ${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set}
+      M369_SA_RUNNER_PASSWORD: ${M369_SA_RUNNER_PASSWORD:?M369_SA_RUNNER_PASSWORD must be set}
+      M369_SA_AUTH_PASSWORD: ${M369_SA_AUTH_PASSWORD:?M369_SA_AUTH_PASSWORD must be set}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/database/01-bootstrap-roles.sql:/docker-entrypoint-initdb.d/01-bootstrap-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d m369_support"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: m369_redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  migration:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: m369_migration
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/m369_support
+      M369_SA_AUTH_PASSWORD: ${M369_SA_AUTH_PASSWORD:?M369_SA_AUTH_PASSWORD must be set}
+      M369_TENANT_CONTEXT_SECRET: ${M369_TENANT_CONTEXT_SECRET:?M369_TENANT_CONTEXT_SECRET must be set}
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - |
+        alembic upgrade head &&
+        python scripts/provision_sa_auth_role.py
+    restart: "no"
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: m369_api
+    environment:
+      DATABASE_URL: postgresql+psycopg://m369_app:${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set}@db:5432/m369_support
+      # Super Admin operations need BYPASSRLS — separate password, never
+      # shared with the migration service.
+      DATABASE_URL_SUPER_ADMIN: postgresql+psycopg://m369_sa_runner:${M369_SA_RUNNER_PASSWORD:?M369_SA_RUNNER_PASSWORD must be set}@db:5432/m369_support
+      # Super Admin authentication-only connection (Package B.1).
+      # Uses m369_sa_auth — NO BYPASSRLS, least-privilege. Used ONLY by
+      # /super-admin/auth/login and /super-admin/auth/login/verify-mfa.
+      DATABASE_URL_SUPER_ADMIN_AUTH: postgresql+psycopg://m369_sa_auth:${M369_SA_AUTH_PASSWORD:?M369_SA_AUTH_PASSWORD must be set}@db:5432/m369_support
+      M369_TENANT_CONTEXT_SECRET: ${M369_TENANT_CONTEXT_SECRET:?M369_TENANT_CONTEXT_SECRET must be set}
+      REDIS_URL: redis://redis:6379/0
+
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-false}
+
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+      JWT_SUPER_ADMIN_SECRET_KEY: ${JWT_SUPER_ADMIN_SECRET_KEY:?JWT_SUPER_ADMIN_SECRET_KEY must be set}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_ACCESS_TOKEN_MINUTES: ${JWT_ACCESS_TOKEN_MINUTES:-10080}
+      JWT_REFRESH_TOKEN_DAYS: ${JWT_REFRESH_TOKEN_DAYS:-30}
+
+      ARGON2_TIME_COST: ${ARGON2_TIME_COST:-3}
+      ARGON2_MEMORY_COST: ${ARGON2_MEMORY_COST:-65536}
+      ARGON2_PARALLELISM: ${ARGON2_PARALLELISM:-2}
+
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set}
+
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:8000}
+
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+
+      # Comma-separated list of trusted reverse-proxy IPs.
+      # Only when the immediate connection comes from one of these IPs will
+      # the API read X-Forwarded-For. Empty = no proxy (direct connections).
+      # NEVER trust arbitrary client-sent X-Forwarded-For without this.
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-}
+
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps/api:/app
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+volumes:
+  postgres_data:

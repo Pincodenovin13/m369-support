@@ -1,0 +1,92 @@
+[project]
+name = "m369-support-api"
+version = "0.1.0"
+description = "M369 Support backend API — multi-tenant SaaS customer support platform"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "M369 Support" }]
+
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.32.1",
+    "python-multipart==0.0.20",
+    "sqlalchemy==2.0.36",
+    "alembic==1.14.0",
+    "psycopg[binary]==3.2.3",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "email-validator==2.2.0",
+    "pyjwt==2.10.1",
+    "argon2-cffi==23.1.0",
+    "bcrypt==4.2.1",
+    "cryptography==44.0.0",
+    "httpx==0.28.1",
+    "slowapi==0.1.9",
+    "redis==5.2.1",
+    "python-dotenv==1.0.1",
+    "structlog==24.4.0",
+    "pyotp==2.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "pytest-cov==6.0.0",
+    "httpx==0.28.1",
+    "ruff==0.8.4",
+    "mypy==1.14.0",
+    "pyyaml==6.0.2",
+    "fakeredis[lua]==2.34.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: tests that require a live PostgreSQL database",
+    "security: tests that verify tenant isolation and authorization",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "W",
+    "F",
+    "I",
+    "N",
+    "UP",
+    "B",
+    "C4",
+    "SIM",
+    "TCH",
+    "RUF",
+    "S",
+]
+ignore = [
+    "E501",
+    "S101",
+    "S104",
+    "S608",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "E", "W"]
+"migrations/**" = ["E", "W"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false

@@ -1,0 +1,2699 @@
+> ⚠️ HISTORICAL PATCH — DO NOT REAPPLY. This patch is already integrated into the
+> current source history (commits on phase-1/foundation or phase-1/security-closure-b1-4).
+> Reapplying would cause conflicts. Preserved for historical reference only.
+
+From 70e026f1b1ef156dc365bcc4cd96a43600f27fa8 Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Thu, 5 Nov 2026 23:46:20 +0000
+Subject: [STAGE 2/3] Stage 3: Super Admin backend + subscription/billing
+ foundation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Adds Super Admin management APIs and the billing/subscription lifecycle.
+All Super Admin operations route through a dedicated DB engine connected
+as ``m369_sa_runner`` (LOGIN, BYPASSRLS, NOSUPERUSER) — a separate
+least-privilege role from the ordinary m369_app. The role's password is
+provisioned via bootstrap SQL (\getenv M369_SA_RUNNER_PASSWORD), never
+hardcoded, never shared with the migration service.
+
+New endpoints (all under /api/v1/super-admin):
+  - GET    /agencies                        list all (BYPASSRLS)
+  - GET    /agencies/{id}                   detail with sub + member count
+  - PATCH  /agencies/{id}                   name / is_active / brand_color
+  - POST   /agencies/{id}/suspend           flip is_active=false (idempotent)
+  - POST   /agencies/{id}/activate          re-activate (idempotent)
+  - GET    /agencies/{id}/members           list memberships (cross-tenant)
+  - PATCH  /agencies/{id}/members/{uid}     change role
+  - GET/POST/PATCH /plans                   plan CRUD (Super Admin only)
+  - GET/PATCH /subscriptions/{id}           lifecycle via state machine
+  - GET    /payments                        list, filter by agency + status
+  - POST   /payments/{id}/verify            idempotent manual verify
+  - POST   /payments/{id}/reject            reject (terminal)
+  - GET/PUT/DELETE /platform-settings/{key} upsert + delete
+  - GET/POST/DELETE /agencies/{id}/notes    Super Admin notes on agencies
+  - GET    /audit-logs                      SA-scoped audit log reader
+
+Subscription lifecycle (services/billing.py):
+  trial → active → past_due → suspended → cancelled
+  Any → superseded (only via plan-change, not direct update)
+  Disallowed transitions return 400.
+  Price snapshot is frozen at creation — later plan price changes
+  do NOT propagate to existing subscriptions.
+
+Payment verification (services/billing.py):
+  - Idempotent: re-verifying a verified payment is a no-op
+  - Terminal states (rejected, expired) cannot be re-verified (409)
+  - Cannot reject an already-verified payment (409)
+  - txid is UNIQUE — duplicate inserts fail at DB level
+  - amount_paid is INTEGER cents (never FLOAT)
+  - Raw on-chain amount + decimals + exchange_rate stored separately
+    for audit (e.g., 19.99 USDT TRC20 → amount_paid=1999,
+    paid_amount_raw=19990000, paid_amount_decimals=6, exchange_rate=1.0)
+
+Migrations:
+  0008 — creates m369_sa_runner role (LOGIN + BYPASSRLS + NOSUPERUSER)
+  0009 — widens payments.paid_currency from String(3) to String(10)
+         so crypto codes like 'USDT' (4 chars) are accepted
+
+Config + bootstrap:
+  - DATABASE_URL_SUPER_ADMIN setting added with production guard
+    (rejects 'm369_sa_runner_dev_password' in production)
+  - docker-compose.yml: API service receives DATABASE_URL_SUPER_ADMIN,
+    db service receives M369_SA_RUNNER_PASSWORD via \getenv
+  - 01-bootstrap-roles.sql: provisions m369_sa_runner password via
+    \getenv M369_SA_RUNNER_PASSWORD
+
+Tests: 31 new tests in test_stage3_super_admin_billing.py:
+  - Token separation (agency ↔ SA) in both directions
+  - Agency CRUD + suspend/activate idempotency + audit
+  - Member role changes
+  - Plan CRUD + duplicate detection + seeded plan visibility
+  - Subscription lifecycle + invalid transition 400 + price snapshot
+  - Payment idempotent verify + terminal state rejection + txid UNIQUE
+  - Financial precision: $19.99 stored as 1999 cents + raw on-chain
+  - Platform settings + agency notes CRUD
+  - Super Admin audit log queries
+  - m369_sa_runner role attribute + table-privilege verification
+
+Total: 128 tests passing (97 + 31). All run against real PostgreSQL 16.2
+with real Alembic migrations 0001-0009.
+
+Migration chain: 0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009
+Total tables: 23 (22 + alembic_version)
+Total API endpoints: 67 (up from 41)
+---
+ apps/api/app/api/v1/super_admin/__init__.py   |   4 +-
+ apps/api/app/api/v1/super_admin/agencies.py   | 311 +++++++++
+ apps/api/app/api/v1/super_admin/payments.py   | 129 ++++
+ apps/api/app/api/v1/super_admin/plans.py      | 111 +++
+ .../v1/super_admin/settings_notes_audit.py    | 247 +++++++
+ .../app/api/v1/super_admin/subscriptions.py   |  82 +++
+ apps/api/app/core/config.py                   |   8 +
+ apps/api/app/db/database.py                   |  29 +
+ apps/api/app/main.py                          |   7 +
+ apps/api/app/models/phase1_extended.py        |   2 +-
+ apps/api/app/schemas/__init__.py              |  39 ++
+ apps/api/app/schemas/super_admin.py           | 274 ++++++++
+ apps/api/app/services/billing.py              | 213 ++++++
+ .../versions/0008_create_sa_runner_role.py    |  82 +++
+ .../versions/0009_widen_paid_currency.py      |  39 ++
+ apps/api/tests/conftest.py                    |  90 ++-
+ .../test_stage3_super_admin_billing.py        | 644 ++++++++++++++++++
+ apps/api/tests/unit/test_config.py            |   2 +
+ docker-compose.yml                            |   4 +
+ .../database/01-bootstrap-roles.sql           |  25 +
+ 20 files changed, 2337 insertions(+), 5 deletions(-)
+ create mode 100644 apps/api/app/api/v1/super_admin/agencies.py
+ create mode 100644 apps/api/app/api/v1/super_admin/payments.py
+ create mode 100644 apps/api/app/api/v1/super_admin/plans.py
+ create mode 100644 apps/api/app/api/v1/super_admin/settings_notes_audit.py
+ create mode 100644 apps/api/app/api/v1/super_admin/subscriptions.py
+ create mode 100644 apps/api/app/schemas/super_admin.py
+ create mode 100644 apps/api/app/services/billing.py
+ create mode 100644 apps/api/migrations/versions/0008_create_sa_runner_role.py
+ create mode 100644 apps/api/migrations/versions/0009_widen_paid_currency.py
+ create mode 100644 apps/api/tests/integration/test_stage3_super_admin_billing.py
+
+diff --git a/apps/api/app/api/v1/super_admin/__init__.py b/apps/api/app/api/v1/super_admin/__init__.py
+index 427cc0e..c16e94f 100644
+--- a/apps/api/app/api/v1/super_admin/__init__.py
++++ b/apps/api/app/api/v1/super_admin/__init__.py
+@@ -1,4 +1,4 @@
+ """Super Admin APIs."""
+-from . import auth
++from . import agencies, auth, payments, plans, settings_notes_audit, subscriptions
+ 
+-__all__ = ["auth"]
++__all__ = ["agencies", "auth", "payments", "plans", "settings_notes_audit", "subscriptions"]
+diff --git a/apps/api/app/api/v1/super_admin/agencies.py b/apps/api/app/api/v1/super_admin/agencies.py
+new file mode 100644
+index 0000000..848e3fd
+--- /dev/null
++++ b/apps/api/app/api/v1/super_admin/agencies.py
+@@ -0,0 +1,311 @@
++"""Super Admin — agency management.
++
++Reads/writes through the ``super_admin_engine`` (BYPASSRLS) so the Super
++Admin can see and modify every tenant's data.
++"""
++from __future__ import annotations
++
++import uuid
++
++from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
++from sqlalchemy import func, select
++from sqlalchemy.orm import Session
++
++from ....db.database import get_super_admin_db
++from ....dependencies import get_super_admin_context
++from ....models import (
++    Agency,
++    AgencyMembership,
++    AgencyNote,
++    Subscription,
++    SuperAdminAuditLog,
++    User,
++)
++from ....schemas import (
++    AgencyAdminDetailOut,
++    AgencyAdminOut,
++    AgencyMemberOut,
++    AgencyMemberRoleUpdate,
++    AgencyUpdateRequest,
++    PaginatedResponse,
++)
++
++
++router = APIRouter(prefix="/super-admin/agencies", tags=["Super Admin — Agencies"])
++
++
++def _sa_id(request: Request) -> uuid.UUID:
++    return request.state.super_admin_id
++
++
++def _ip(request: Request) -> str | None:
++    return request.client.host if request.client else None
++
++
++@router.get("", response_model=PaginatedResponse[AgencyAdminDetailOut])
++def list_agencies(
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++    search: str | None = Query(default=None, max_length=120),
++    is_active: bool | None = Query(default=None),
++    limit: int = Query(default=25, ge=1, le=100),
++    offset: int = Query(default=0, ge=0),
++):
++    """List all agencies with their subscription summary + member count.
++
++    RLS is bypassed via the m369_sa_runner connection.
++    """
++    stmt = select(Agency)
++    count_stmt = select(func.count()).select_from(Agency)
++    if search:
++        like = f"%{search}%"
++        stmt = stmt.where(Agency.name.ilike(like) | Agency.slug.ilike(like))
++        count_stmt = count_stmt.where(Agency.name.ilike(like) | Agency.slug.ilike(like))
++    if is_active is not None:
++        stmt = stmt.where(Agency.is_active == is_active)
++        count_stmt = count_stmt.where(Agency.is_active == is_active)
++    total = db.scalar(count_stmt) or 0
++    agencies = list(db.scalars(stmt.order_by(Agency.created_at.desc()).limit(limit).offset(offset)).all())
++
++    # Bulk-load subscriptions + member counts
++    agency_ids = [a.id for a in agencies]
++    subs_by_agency: dict[uuid.UUID, Subscription] = {}
++    counts_by_agency: dict[uuid.UUID, int] = {}
++    if agency_ids:
++        sub_rows = db.scalars(
++            select(Subscription).where(
++                Subscription.agency_id.in_(agency_ids),
++                Subscription.status.in_(("trial", "active", "past_due", "suspended")),
++            )
++        ).all()
++        for s in sub_rows:
++            subs_by_agency[s.agency_id] = s
++        count_rows = db.execute(
++            select(AgencyMembership.agency_id, func.count())
++            .where(AgencyMembership.agency_id.in_(agency_ids))
++            .group_by(AgencyMembership.agency_id)
++        ).all()
++        counts_by_agency = {aid: cnt for aid, cnt in count_rows}
++
++    items: list[AgencyAdminDetailOut] = []
++    for a in agencies:
++        sub = subs_by_agency.get(a.id)
++        items.append(AgencyAdminDetailOut(
++            id=a.id,
++            name=a.name,
++            slug=a.slug,
++            brand_color=a.brand_color,
++            is_active=a.is_active,
++            created_at=a.created_at,
++            subscription_id=sub.id if sub else None,
++            subscription_status=sub.status if sub else None,
++            plan_name=sub.plan_name_snapshot if sub else None,
++            member_count=counts_by_agency.get(a.id, 0),
++        ))
++    return PaginatedResponse[AgencyAdminDetailOut](items=items, total=total, limit=limit, offset=offset)
++
++
++@router.get("/{agency_id}", response_model=AgencyAdminDetailOut)
++def get_agency(
++    agency_id: uuid.UUID,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    a = db.get(Agency, agency_id)
++    if a is None:
++        raise HTTPException(status_code=404, detail="Agency not found")
++    sub = db.scalar(
++        select(Subscription).where(
++            Subscription.agency_id == agency_id,
++            Subscription.status.in_(("trial", "active", "past_due", "suspended")),
++        )
++    )
++    member_count = db.scalar(
++        select(func.count()).select_from(AgencyMembership).where(AgencyMembership.agency_id == agency_id)
++    ) or 0
++    return AgencyAdminDetailOut(
++        id=a.id,
++        name=a.name,
++        slug=a.slug,
++        brand_color=a.brand_color,
++        is_active=a.is_active,
++        created_at=a.created_at,
++        subscription_id=sub.id if sub else None,
++        subscription_status=sub.status if sub else None,
++        plan_name=sub.plan_name_snapshot if sub else None,
++        member_count=member_count,
++    )
++
++
++@router.patch("/{agency_id}", response_model=AgencyAdminOut)
++def update_agency(
++    agency_id: uuid.UUID,
++    payload: AgencyUpdateRequest,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    a = db.get(Agency, agency_id)
++    if a is None:
++        raise HTTPException(status_code=404, detail="Agency not found")
++    changes: dict = {}
++    if payload.name is not None and payload.name != a.name:
++        a.name = payload.name
++        changes["name"] = payload.name
++    if payload.is_active is not None and payload.is_active != a.is_active:
++        a.is_active = payload.is_active
++        changes["is_active"] = payload.is_active
++    if payload.brand_color is not None and payload.brand_color != a.brand_color:
++        a.brand_color = payload.brand_color
++        changes["brand_color"] = payload.brand_color
++    if changes:
++        db.add(SuperAdminAuditLog(
++            super_admin_id=_sa_id(request),
++            action="agency.update",
++            target_type="agency",
++            target_id=agency_id,
++            metadata_=changes,
++            ip_address=_ip(request),
++        ))
++    db.commit()
++    db.refresh(a)
++    return a
++
++
++@router.post("/{agency_id}/suspend", response_model=AgencyAdminOut)
++def suspend_agency(
++    agency_id: uuid.UUID,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    """Suspend an agency by flipping ``is_active`` to false.
++
++    All subsequent agency-scoped requests from this agency's users will
++    return 403 ("Agency is not active") via the ``get_current_agency_id``
++    dependency.
++    """
++    a = db.get(Agency, agency_id)
++    if a is None:
++        raise HTTPException(status_code=404, detail="Agency not found")
++    if not a.is_active:
++        return a  # idempotent
++    a.is_active = False
++    db.add(SuperAdminAuditLog(
++        super_admin_id=_sa_id(request),
++        action="agency.suspend",
++        target_type="agency",
++        target_id=agency_id,
++        metadata_={},
++        ip_address=_ip(request),
++    ))
++    db.commit()
++    db.refresh(a)
++    return a
++
++
++@router.post("/{agency_id}/activate", response_model=AgencyAdminOut)
++def activate_agency(
++    agency_id: uuid.UUID,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    """Re-activate a previously suspended agency."""
++    a = db.get(Agency, agency_id)
++    if a is None:
++        raise HTTPException(status_code=404, detail="Agency not found")
++    if a.is_active:
++        return a  # idempotent
++    a.is_active = True
++    db.add(SuperAdminAuditLog(
++        super_admin_id=_sa_id(request),
++        action="agency.activate",
++        target_type="agency",
++        target_id=agency_id,
++        metadata_={},
++        ip_address=_ip(request),
++    ))
++    db.commit()
++    db.refresh(a)
++    return a
++
++
++# ---------------------------------------------------------------------------
++# Members
++# ---------------------------------------------------------------------------
++
++
++@router.get("/{agency_id}/members", response_model=list[AgencyMemberOut])
++def list_agency_members(
++    agency_id: uuid.UUID,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    a = db.get(Agency, agency_id)
++    if a is None:
++        raise HTTPException(status_code=404, detail="Agency not found")
++    rows = db.scalars(
++        select(AgencyMembership).where(AgencyMembership.agency_id == agency_id)
++    ).all()
++    out: list[AgencyMemberOut] = []
++    for m in rows:
++        u = db.get(User, m.user_id)
++        out.append(AgencyMemberOut(
++            id=m.id,
++            user_id=m.user_id,
++            agency_id=m.agency_id,
++            role=m.role,
++            user_email=u.email if u else None,
++            user_name=u.name if u else None,
++            created_at=m.created_at,
++        ))
++    return out
++
++
++@router.patch("/{agency_id}/members/{user_id}", response_model=AgencyMemberOut)
++def update_member_role(
++    agency_id: uuid.UUID,
++    user_id: uuid.UUID,
++    payload: AgencyMemberRoleUpdate,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    m = db.scalar(
++        select(AgencyMembership).where(
++            AgencyMembership.user_id == user_id,
++            AgencyMembership.agency_id == agency_id,
++        )
++    )
++    if m is None:
++        raise HTTPException(status_code=404, detail="Membership not found")
++    old_role = m.role
++    if old_role == payload.role:
++        return _membership_out(db, m)
++    m.role = payload.role
++    db.add(SuperAdminAuditLog(
++        super_admin_id=_sa_id(request),
++        action="agency.member.role_change",
++        target_type="agency_membership",
++        target_id=m.id,
++        metadata_={"old": old_role, "new": payload.role, "user_id": str(user_id)},
++        ip_address=_ip(request),
++    ))
++    db.commit()
++    db.refresh(m)
++    return _membership_out(db, m)
++
++
++def _membership_out(db: Session, m: AgencyMembership) -> AgencyMemberOut:
++    u = db.get(User, m.user_id)
++    return AgencyMemberOut(
++        id=m.id,
++        user_id=m.user_id,
++        agency_id=m.agency_id,
++        role=m.role,
++        user_email=u.email if u else None,
++        user_name=u.name if u else None,
++        created_at=m.created_at,
++    )
+diff --git a/apps/api/app/api/v1/super_admin/payments.py b/apps/api/app/api/v1/super_admin/payments.py
+new file mode 100644
+index 0000000..95ae8dd
+--- /dev/null
++++ b/apps/api/app/api/v1/super_admin/payments.py
+@@ -0,0 +1,129 @@
++"""Super Admin — payments.
++
++Phase 1: payments are verified manually by a Super Admin. There is no
++on-chain or webhook integration — that's Phase 2. The verify endpoint
++accepts the Super Admin's conversion of the on-chain amount to base
++currency cents, plus the raw values + decimals + rate for audit.
++
++Idempotency: the ``payments.txid`` column is UNIQUE. Re-verifying an
++already-verified payment is a no-op (returns the existing row).
++"""
++from __future__ import annotations
++
++import uuid
++
++from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
++from sqlalchemy import func, select
++from sqlalchemy.orm import Session
++
++from ....db.database import get_super_admin_db
++from ....dependencies import get_super_admin_context
++from ....models import Payment
++from ....schemas import (
++    PaginatedResponse,
++    PaymentOut,
++    PaymentRejectRequest,
++    PaymentVerifyRequest,
++)
++from ....services.billing import reject_payment, verify_payment
++
++router = APIRouter(prefix="/super-admin/payments", tags=["Super Admin — Payments"])
++
++
++def _sa_id(request: Request) -> uuid.UUID:
++    return request.state.super_admin_id
++
++
++def _ip(request: Request) -> str | None:
++    return request.client.host if request.client else None
++
++
++@router.get("", response_model=PaginatedResponse[PaymentOut])
++def list_payments(
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++    agency_id: uuid.UUID | None = Query(default=None),
++    status_: str | None = Query(default=None, alias="status", pattern=r"^(pending|verifying|verified|rejected|expired)$"),
++    limit: int = Query(default=25, ge=1, le=100),
++    offset: int = Query(default=0, ge=0),
++):
++    stmt = select(Payment)
++    count_stmt = select(func.count()).select_from(Payment)
++    if agency_id is not None:
++        stmt = stmt.where(Payment.agency_id == agency_id)
++        count_stmt = count_stmt.where(Payment.agency_id == agency_id)
++    if status_ is not None:
++        stmt = stmt.where(Payment.status == status_)
++        count_stmt = count_stmt.where(Payment.status == status_)
++    total = db.scalar(count_stmt) or 0
++    items = list(db.scalars(stmt.order_by(Payment.created_at.desc()).limit(limit).offset(offset)).all())
++    return PaginatedResponse[PaymentOut](items=items, total=total, limit=limit, offset=offset)
++
++
++@router.get("/{payment_id}", response_model=PaymentOut)
++def get_payment(
++    payment_id: uuid.UUID,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    p = db.get(Payment, payment_id)
++    if p is None:
++        raise HTTPException(status_code=404, detail="Payment not found")
++    return p
++
++
++@router.post("/{payment_id}/verify", response_model=PaymentOut)
++def verify_payment_endpoint(
++    payment_id: uuid.UUID,
++    payload: PaymentVerifyRequest,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    """Manually verify a payment. Idempotent — re-verifying returns same row.
++
++    Stores both the base-currency amount_paid (cents, INTEGER — never FLOAT)
++    AND the raw on-chain values + decimals + exchange_rate for audit.
++    """
++    p = db.get(Payment, payment_id)
++    if p is None:
++        raise HTTPException(status_code=404, detail="Payment not found")
++    verify_payment(
++        db,
++        payment=p,
++        super_admin_id=_sa_id(request),
++        amount_paid_cents=payload.amount_paid,
++        paid_currency=payload.paid_currency,
++        paid_amount_raw=payload.paid_amount_raw,
++        paid_amount_decimals=payload.paid_amount_decimals,
++        exchange_rate=payload.exchange_rate,
++        network=payload.network,
++        note=payload.note,
++        ip_address=_ip(request),
++    )
++    db.commit()
++    db.refresh(p)
++    return p
++
++
++@router.post("/{payment_id}/reject", response_model=PaymentOut)
++def reject_payment_endpoint(
++    payment_id: uuid.UUID,
++    payload: PaymentRejectRequest,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    p = db.get(Payment, payment_id)
++    if p is None:
++        raise HTTPException(status_code=404, detail="Payment not found")
++    reject_payment(
++        db,
++        payment=p,
++        super_admin_id=_sa_id(request),
++        failure_reason=payload.failure_reason,
++        ip_address=_ip(request),
++    )
++    db.commit()
++    db.refresh(p)
++    return p
+diff --git a/apps/api/app/api/v1/super_admin/plans.py b/apps/api/app/api/v1/super_admin/plans.py
+new file mode 100644
+index 0000000..9670ac5
+--- /dev/null
++++ b/apps/api/app/api/v1/super_admin/plans.py
+@@ -0,0 +1,111 @@
++"""Super Admin — plans CRUD."""
++from __future__ import annotations
++
++import uuid
++
++from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
++from sqlalchemy import func, select
++from sqlalchemy.orm import Session
++
++from ....db.database import get_super_admin_db
++from ....dependencies import get_super_admin_context
++from ....models import Plan, SuperAdminAuditLog
++from ....schemas import PaginatedResponse, PlanCreate, PlanOut, PlanUpdate
++
++router = APIRouter(prefix="/super-admin/plans", tags=["Super Admin — Plans"])
++
++
++def _sa_id(request: Request) -> uuid.UUID:
++    return request.state.super_admin_id
++
++
++def _ip(request: Request) -> str | None:
++    return request.client.host if request.client else None
++
++
++@router.get("", response_model=PaginatedResponse[PlanOut])
++def list_plans(
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++    is_active: bool | None = Query(default=None),
++    limit: int = Query(default=50, ge=1, le=100),
++    offset: int = Query(default=0, ge=0),
++):
++    stmt = select(Plan)
++    count_stmt = select(func.count()).select_from(Plan)
++    if is_active is not None:
++        stmt = stmt.where(Plan.is_active == is_active)
++        count_stmt = count_stmt.where(Plan.is_active == is_active)
++    total = db.scalar(count_stmt) or 0
++    items = list(db.scalars(stmt.order_by(Plan.sort_order.asc(), Plan.created_at.asc()).limit(limit).offset(offset)).all())
++    return PaginatedResponse[PlanOut](items=items, total=total, limit=limit, offset=offset)
++
++
++@router.post("", response_model=PlanOut, status_code=status.HTTP_201_CREATED)
++def create_plan(
++    payload: PlanCreate,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    existing = db.scalar(select(Plan).where(Plan.name == payload.name))
++    if existing is not None:
++        raise HTTPException(status_code=409, detail=f"Plan '{payload.name}' already exists")
++    plan = Plan(
++        name=payload.name,
++        display_name=payload.display_name,
++        price_monthly=payload.price_monthly,
++        currency=payload.currency,
++        is_active=payload.is_active,
++        sort_order=payload.sort_order,
++        features=payload.features,
++        limits=payload.limits,
++        trial_days=payload.trial_days,
++    )
++    db.add(plan)
++    db.flush()
++    db.add(SuperAdminAuditLog(
++        super_admin_id=_sa_id(request),
++        action="plan.create",
++        target_type="plan",
++        target_id=plan.id,
++        metadata_={"name": plan.name, "price_monthly": plan.price_monthly, "currency": plan.currency},
++        ip_address=_ip(request),
++    ))
++    db.commit()
++    db.refresh(plan)
++    return plan
++
++
++@router.patch("/{plan_id}", response_model=PlanOut)
++def update_plan(
++    plan_id: uuid.UUID,
++    payload: PlanUpdate,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    plan = db.get(Plan, plan_id)
++    if plan is None:
++        raise HTTPException(status_code=404, detail="Plan not found")
++    changes: dict = {}
++    for field in ("display_name", "price_monthly", "currency", "is_active", "sort_order", "features", "limits", "trial_days"):
++        val = getattr(payload, field)
++        if val is not None and val != getattr(plan, field):
++            setattr(plan, field, val)
++            if field in ("features", "limits"):
++                changes[field] = True  # don't log potentially large dict
++            else:
++                changes[field] = val
++    if changes:
++        db.add(SuperAdminAuditLog(
++            super_admin_id=_sa_id(request),
++            action="plan.update",
++            target_type="plan",
++            target_id=plan.id,
++            metadata_=changes,
++            ip_address=_ip(request),
++        ))
++    db.commit()
++    db.refresh(plan)
++    return plan
+diff --git a/apps/api/app/api/v1/super_admin/settings_notes_audit.py b/apps/api/app/api/v1/super_admin/settings_notes_audit.py
+new file mode 100644
+index 0000000..7c5ba12
+--- /dev/null
++++ b/apps/api/app/api/v1/super_admin/settings_notes_audit.py
+@@ -0,0 +1,247 @@
++"""Super Admin — platform settings + agency notes + audit log reader."""
++from __future__ import annotations
++
++import uuid
++from datetime import datetime
++from typing import Any
++
++from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
++from sqlalchemy import func, select
++from sqlalchemy.orm import Session
++
++from ....db.database import get_super_admin_db
++from ....dependencies import get_super_admin_context
++from ....models import (
++    Agency,
++    AgencyNote,
++    Plan,
++    PlatformSetting,
++    SuperAdminAuditLog,
++)
++from ....schemas import (
++    AgencyNoteCreate,
++    AgencyNoteOut,
++    PaginatedResponse,
++    PlatformSettingOut,
++    PlatformSettingUpsert,
++    SuperAdminAuditLogOut,
++)
++
++
++# ---------------------------------------------------------------------------
++# Platform Settings
++# ---------------------------------------------------------------------------
++
++
++settings_router = APIRouter(prefix="/super-admin/platform-settings", tags=["Super Admin — Platform Settings"])
++
++
++def _sa_id(request: Request) -> uuid.UUID:
++    return request.state.super_admin_id
++
++
++def _ip(request: Request) -> str | None:
++    return request.client.host if request.client else None
++
++
++@settings_router.get("", response_model=list[PlatformSettingOut])
++def list_settings(
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    items = list(db.scalars(select(PlatformSetting).order_by(PlatformSetting.key.asc())).all())
++    return items
++
++
++@settings_router.put("/{key}", response_model=PlatformSettingOut)
++def upsert_setting(
++    key: str,
++    payload: PlatformSettingUpsert,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    """Upsert a platform setting by key."""
++    existing = db.get(PlatformSetting, key)
++    if existing is None:
++        s = PlatformSetting(
++            key=key,
++            value=payload.value,
++            value_type=payload.value_type,
++            description=payload.description,
++            updated_by_super_admin_id=_sa_id(request),
++        )
++        db.add(s)
++        db.flush()
++        db.add(SuperAdminAuditLog(
++            super_admin_id=_sa_id(request),
++            action="platform_setting.create",
++            target_type="platform_setting",
++            target_id=None,
++            metadata_={"key": key, "value_type": payload.value_type},
++            ip_address=_ip(request),
++        ))
++    else:
++        old_value = existing.value
++        existing.value = payload.value
++        existing.value_type = payload.value_type
++        if payload.description:
++            existing.description = payload.description
++        existing.updated_by_super_admin_id = _sa_id(request)
++        db.add(SuperAdminAuditLog(
++            super_admin_id=_sa_id(request),
++            action="platform_setting.update",
++            target_type="platform_setting",
++            target_id=None,
++            metadata_={"key": key, "old_value": old_value[:200], "new_value": payload.value[:200]},
++            ip_address=_ip(request),
++        ))
++    db.commit()
++    return db.get(PlatformSetting, key)
++
++
++@settings_router.delete("/{key}", status_code=status.HTTP_204_NO_CONTENT)
++def delete_setting(
++    key: str,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    s = db.get(PlatformSetting, key)
++    if s is None:
++        raise HTTPException(status_code=404, detail="Setting not found")
++    db.add(SuperAdminAuditLog(
++        super_admin_id=_sa_id(request),
++        action="platform_setting.delete",
++        target_type="platform_setting",
++        target_id=None,
++        metadata_={"key": key},
++        ip_address=_ip(request),
++    ))
++    db.delete(s)
++    db.commit()
++    return None
++
++
++# ---------------------------------------------------------------------------
++# Agency Notes
++# ---------------------------------------------------------------------------
++
++
++notes_router = APIRouter(prefix="/super-admin/agencies/{agency_id}/notes", tags=["Super Admin — Agency Notes"])
++
++
++@notes_router.get("", response_model=list[AgencyNoteOut])
++def list_notes(
++    agency_id: uuid.UUID,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    a = db.get(Agency, agency_id)
++    if a is None:
++        raise HTTPException(status_code=404, detail="Agency not found")
++    rows = db.scalars(
++        select(AgencyNote)
++        .where(AgencyNote.agency_id == agency_id)
++        .order_by(AgencyNote.is_pinned.desc(), AgencyNote.created_at.desc())
++    ).all()
++    return list(rows)
++
++
++@notes_router.post("", response_model=AgencyNoteOut, status_code=status.HTTP_201_CREATED)
++def create_note(
++    agency_id: uuid.UUID,
++    payload: AgencyNoteCreate,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    a = db.get(Agency, agency_id)
++    if a is None:
++        raise HTTPException(status_code=404, detail="Agency not found")
++    note = AgencyNote(
++        agency_id=agency_id,
++        super_admin_id=_sa_id(request),
++        note=payload.note,
++        is_pinned=payload.is_pinned,
++    )
++    db.add(note)
++    db.flush()
++    db.add(SuperAdminAuditLog(
++        super_admin_id=_sa_id(request),
++        action="agency_note.create",
++        target_type="agency_note",
++        target_id=note.id,
++        metadata_={"agency_id": str(agency_id), "is_pinned": payload.is_pinned},
++        ip_address=_ip(request),
++    ))
++    db.commit()
++    db.refresh(note)
++    return note
++
++
++@notes_router.delete("/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
++def delete_note(
++    agency_id: uuid.UUID,
++    note_id: uuid.UUID,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    note = db.scalar(
++        select(AgencyNote).where(
++            AgencyNote.id == note_id,
++            AgencyNote.agency_id == agency_id,
++        )
++    )
++    if note is None:
++        raise HTTPException(status_code=404, detail="Note not found")
++    db.add(SuperAdminAuditLog(
++        super_admin_id=_sa_id(request),
++        action="agency_note.delete",
++        target_type="agency_note",
++        target_id=note_id,
++        metadata_={"agency_id": str(agency_id)},
++        ip_address=_ip(request),
++    ))
++    db.delete(note)
++    db.commit()
++    return None
++
++
++# ---------------------------------------------------------------------------
++# Super Admin Audit Log
++# ---------------------------------------------------------------------------
++
++
++audit_router = APIRouter(prefix="/super-admin/audit-logs", tags=["Super Admin — Audit Log"])
++
++
++@audit_router.get("", response_model=PaginatedResponse[SuperAdminAuditLogOut])
++def list_sa_audit_logs(
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++    action: str | None = Query(default=None, max_length=100),
++    super_admin_id: uuid.UUID | None = Query(default=None),
++    since: datetime | None = Query(default=None),
++    until: datetime | None = Query(default=None),
++    limit: int = Query(default=50, ge=1, le=100),
++    offset: int = Query(default=0, ge=0),
++):
++    stmt = select(SuperAdminAuditLog)
++    count_stmt = select(func.count()).select_from(SuperAdminAuditLog)
++    if action is not None:
++        stmt = stmt.where(SuperAdminAuditLog.action == action)
++        count_stmt = count_stmt.where(SuperAdminAuditLog.action == action)
++    if super_admin_id is not None:
++        stmt = stmt.where(SuperAdminAuditLog.super_admin_id == super_admin_id)
++        count_stmt = count_stmt.where(SuperAdminAuditLog.super_admin_id == super_admin_id)
++    if since is not None:
++        stmt = stmt.where(SuperAdminAuditLog.created_at >= since)
++        count_stmt = count_stmt.where(SuperAdminAuditLog.created_at >= since)
++    if until is not None:
++        stmt = stmt.where(SuperAdminAuditLog.created_at <= until)
++        count_stmt = count_stmt.where(SuperAdminAuditLog.created_at <= until)
++    total = db.scalar(count_stmt) or 0
++    items = list(db.scalars(stmt.order_by(SuperAdminAuditLog.created_at.desc()).limit(limit).offset(offset)).all())
++    return PaginatedResponse[SuperAdminAuditLogOut](items=items, total=total, limit=limit, offset=offset)
+diff --git a/apps/api/app/api/v1/super_admin/subscriptions.py b/apps/api/app/api/v1/super_admin/subscriptions.py
+new file mode 100644
+index 0000000..bf48de5
+--- /dev/null
++++ b/apps/api/app/api/v1/super_admin/subscriptions.py
+@@ -0,0 +1,82 @@
++"""Super Admin — subscriptions."""
++from __future__ import annotations
++
++import uuid
++
++from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
++from sqlalchemy import func, select
++from sqlalchemy.orm import Session
++
++from ....db.database import get_super_admin_db
++from ....dependencies import get_super_admin_context
++from ....models import Subscription, SuperAdminAuditLog
++from ....schemas import PaginatedResponse, SubscriptionOut, SubscriptionStatusUpdate
++from ....services.billing import update_subscription_status
++
++router = APIRouter(prefix="/super-admin/subscriptions", tags=["Super Admin — Subscriptions"])
++
++
++def _sa_id(request: Request) -> uuid.UUID:
++    return request.state.super_admin_id
++
++
++def _ip(request: Request) -> str | None:
++    return request.client.host if request.client else None
++
++
++@router.get("", response_model=PaginatedResponse[SubscriptionOut])
++def list_subscriptions(
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++    agency_id: uuid.UUID | None = Query(default=None),
++    status_: str | None = Query(default=None, alias="status", pattern=r"^(trial|active|past_due|suspended|cancelled|superseded)$"),
++    limit: int = Query(default=25, ge=1, le=100),
++    offset: int = Query(default=0, ge=0),
++):
++    stmt = select(Subscription)
++    count_stmt = select(func.count()).select_from(Subscription)
++    if agency_id is not None:
++        stmt = stmt.where(Subscription.agency_id == agency_id)
++        count_stmt = count_stmt.where(Subscription.agency_id == agency_id)
++    if status_ is not None:
++        stmt = stmt.where(Subscription.status == status_)
++        count_stmt = count_stmt.where(Subscription.status == status_)
++    total = db.scalar(count_stmt) or 0
++    items = list(db.scalars(stmt.order_by(Subscription.created_at.desc()).limit(limit).offset(offset)).all())
++    return PaginatedResponse[SubscriptionOut](items=items, total=total, limit=limit, offset=offset)
++
++
++@router.get("/{subscription_id}", response_model=SubscriptionOut)
++def get_subscription(
++    subscription_id: uuid.UUID,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    s = db.get(Subscription, subscription_id)
++    if s is None:
++        raise HTTPException(status_code=404, detail="Subscription not found")
++    return s
++
++
++@router.patch("/{subscription_id}", response_model=SubscriptionOut)
++def update_subscription(
++    subscription_id: uuid.UUID,
++    payload: SubscriptionStatusUpdate,
++    request: Request,
++    db: Session = Depends(get_super_admin_db),
++    ctx=Depends(get_super_admin_context),
++):
++    s = db.get(Subscription, subscription_id)
++    if s is None:
++        raise HTTPException(status_code=404, detail="Subscription not found")
++    update_subscription_status(
++        db,
++        subscription=s,
++        new_status=payload.status,
++        super_admin_id=_sa_id(request),
++        current_period_ends_at=payload.current_period_ends_at,
++        ip_address=_ip(request),
++    )
++    db.commit()
++    db.refresh(s)
++    return s
+diff --git a/apps/api/app/core/config.py b/apps/api/app/core/config.py
+index e3e647f..50299f6 100755
+--- a/apps/api/app/core/config.py
++++ b/apps/api/app/core/config.py
+@@ -62,6 +62,12 @@ class Settings(BaseSettings):
+     test_database_url: str = Field(
+         default="postgresql+psycopg://postgres@localhost:5432/m369_support_test"
+     )
++    # Super Admin operations: separate engine, BYPASSRLS but NOSUPERUSER.
++    # NEVER shared with the migration service. In dev the URL is derived
++    # from database_url; production MUST override via env var.
++    database_url_super_admin: str = Field(
++        default="postgresql+psycopg://m369_sa_runner:m369_sa_runner_dev_password@localhost:5432/m369_support"
++    )
+ 
+     # --- JWT ---
+     jwt_secret_key: str = Field(
+@@ -116,6 +122,8 @@ class Settings(BaseSettings):
+             violations.append("ENCRYPTION_KEY is a dev default")
+         if any(frag in self.database_url for frag in _DEV_DB_PASSWORD_FRAGMENTS):
+             violations.append("DATABASE_URL contains a dev-only password")
++        if "m369_sa_runner_dev_password" in self.database_url_super_admin:
++            violations.append("DATABASE_URL_SUPER_ADMIN contains a dev-only password")
+         if not self.cookie_secure:
+             violations.append("COOKIE_SECURE is false")
+         if violations:
+diff --git a/apps/api/app/db/database.py b/apps/api/app/db/database.py
+index 4d233ba..01d4ebb 100644
+--- a/apps/api/app/db/database.py
++++ b/apps/api/app/db/database.py
+@@ -43,6 +43,16 @@ engine: Engine = _build_engine(get_settings().database_url)
+ SessionLocal: sessionmaker[Session] = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+ 
+ 
++# Super Admin operations need a BYPASSRLS connection to read/write across
++# all tenants. The m369_sa_runner role is provisioned externally with
++# BYPASSRLS but NOSUPERUSER — so it can still only do CRUD on tables,
++# never CREATE/DROP/ROLE/etc.
++super_admin_engine: Engine = _build_engine(get_settings().database_url_super_admin)
++SuperAdminSessionLocal: sessionmaker[Session] = sessionmaker(
++    bind=super_admin_engine, autoflush=False, expire_on_commit=False
++)
++
++
+ class Base(DeclarativeBase):
+     """Declarative base for all SQLAlchemy models."""
+ 
+@@ -80,6 +90,25 @@ def get_db() -> Iterator[Session]:
+         db.close()
+ 
+ 
++def get_super_admin_db() -> Iterator[Session]:
++    """FastAPI dependency: yield a Super Admin session connected as m369_sa_runner.
++
++    The ``m369_sa_runner`` role has BYPASSRLS — RLS policies are skipped,
++    so the session sees every tenant's rows. Use ONLY for Super Admin
++    endpoints (verified by ``get_super_admin_context``).
++
++    The session's ``info["is_super_admin"]`` flag is set so the
++    ``after_begin`` listener knows to skip re-issuing SET LOCAL
++    app.tenant_id (Super Admin has no tenant scope).
++    """
++    db = SuperAdminSessionLocal()
++    db.info["is_super_admin"] = True
++    try:
++        yield db
++    finally:
++        db.close()
++
++
+ @contextmanager
+ def session_scope(*, tenant_id: Any = None) -> Iterator[Session]:
+     """Open a session outside a request (background jobs, scripts, tests)."""
+diff --git a/apps/api/app/main.py b/apps/api/app/main.py
+index 6c0cbf2..cb98640 100644
+--- a/apps/api/app/main.py
++++ b/apps/api/app/main.py
+@@ -64,6 +64,13 @@ def create_app() -> FastAPI:
+     app.include_router(canned_responses.router, prefix="/api/v1")
+     app.include_router(audit_logs.router, prefix="/api/v1")
+     app.include_router(super_admin.auth.router, prefix="/api/v1")
++    app.include_router(super_admin.agencies.router, prefix="/api/v1")
++    app.include_router(super_admin.plans.router, prefix="/api/v1")
++    app.include_router(super_admin.subscriptions.router, prefix="/api/v1")
++    app.include_router(super_admin.payments.router, prefix="/api/v1")
++    app.include_router(super_admin.settings_notes_audit.settings_router, prefix="/api/v1")
++    app.include_router(super_admin.settings_notes_audit.notes_router, prefix="/api/v1")
++    app.include_router(super_admin.settings_notes_audit.audit_router, prefix="/api/v1")
+ 
+     @app.get("/health", tags=["System"])
+     def root_health():
+diff --git a/apps/api/app/models/phase1_extended.py b/apps/api/app/models/phase1_extended.py
+index 7669c94..8e68b84 100644
+--- a/apps/api/app/models/phase1_extended.py
++++ b/apps/api/app/models/phase1_extended.py
+@@ -296,7 +296,7 @@ class Payment(Base, TimestampMixin):
+     amount_paid: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # cents, actually paid
+     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD", server_default="USD")
+     # For crypto/multi-currency
+-    paid_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
++    paid_currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
+     paid_amount_raw: Mapped[int | None] = mapped_column(Integer, nullable=True)  # raw integer from blockchain
+     paid_amount_decimals: Mapped[int | None] = mapped_column(Integer, nullable=True)  # e.g. 6 for USDT TRC20
+     exchange_rate: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)  # rate at tx time
+diff --git a/apps/api/app/schemas/__init__.py b/apps/api/app/schemas/__init__.py
+index 379a643..5b36dc3 100644
+--- a/apps/api/app/schemas/__init__.py
++++ b/apps/api/app/schemas/__init__.py
+@@ -161,6 +161,26 @@ from .channels_kb import (
+     KBCategoryOut,
+ )
+ from .audit import AuditLogOut
++from .super_admin import (
++    AgencyAdminDetailOut,
++    AgencyAdminOut,
++    AgencyMemberOut,
++    AgencyMemberRoleUpdate,
++    AgencyNoteCreate,
++    AgencyNoteOut,
++    AgencyUpdateRequest,
++    PaymentOut,
++    PaymentRejectRequest,
++    PaymentVerifyRequest,
++    PlanCreate,
++    PlanOut,
++    PlanUpdate,
++    PlatformSettingOut,
++    PlatformSettingUpsert,
++    SubscriptionOut,
++    SubscriptionStatusUpdate,
++    SuperAdminAuditLogOut,
++)
+ 
+ 
+ __all__ = [
+@@ -213,4 +233,23 @@ __all__ = [
+     "CannedResponseOut",
+     # Audit
+     "AuditLogOut",
++    # Super Admin (Stage 3)
++    "AgencyAdminOut",
++    "AgencyAdminDetailOut",
++    "AgencyUpdateRequest",
++    "AgencyMemberOut",
++    "AgencyMemberRoleUpdate",
++    "PlanCreate",
++    "PlanUpdate",
++    "PlanOut",
++    "SubscriptionOut",
++    "SubscriptionStatusUpdate",
++    "PaymentOut",
++    "PaymentVerifyRequest",
++    "PaymentRejectRequest",
++    "PlatformSettingOut",
++    "PlatformSettingUpsert",
++    "AgencyNoteCreate",
++    "AgencyNoteOut",
++    "SuperAdminAuditLogOut",
+ ]
+diff --git a/apps/api/app/schemas/super_admin.py b/apps/api/app/schemas/super_admin.py
+new file mode 100644
+index 0000000..50ce007
+--- /dev/null
++++ b/apps/api/app/schemas/super_admin.py
+@@ -0,0 +1,274 @@
++"""Schemas for Super Admin operations: agency management, billing, settings."""
++from __future__ import annotations
++
++import uuid
++from datetime import datetime
++from typing import Any
++
++from pydantic import BaseModel, ConfigDict, EmailStr, Field
++
++
++# ---------------------------------------------------------------------------
++# Agencies (Super Admin view)
++# ---------------------------------------------------------------------------
++
++
++class AgencyAdminOut(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: uuid.UUID
++    name: str
++    slug: str
++    brand_color: str
++    is_active: bool
++    created_at: datetime
++
++
++class AgencyAdminDetailOut(AgencyAdminOut):
++    """Agency detail with subscription summary + member count."""
++
++    subscription_id: uuid.UUID | None = None
++    subscription_status: str | None = None
++    plan_name: str | None = None
++    member_count: int = 0
++
++
++class AgencyUpdateRequest(BaseModel):
++    name: str | None = Field(default=None, min_length=2, max_length=180)
++    is_active: bool | None = None
++    brand_color: str | None = Field(default=None, max_length=20)
++
++
++# ---------------------------------------------------------------------------
++# Members (Super Admin view of agency memberships)
++# ---------------------------------------------------------------------------
++
++
++class AgencyMemberOut(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: uuid.UUID
++    user_id: uuid.UUID
++    agency_id: uuid.UUID
++    role: str
++    user_email: str | None = None
++    user_name: str | None = None
++    created_at: datetime
++
++
++class AgencyMemberRoleUpdate(BaseModel):
++    role: str = Field(pattern=r"^(owner|admin|manager|agent|viewer)$")
++
++
++# ---------------------------------------------------------------------------
++# Plans
++# ---------------------------------------------------------------------------
++
++
++class PlanCreate(BaseModel):
++    name: str = Field(min_length=2, max_length=60, pattern=r"^[a-z0-9_-]+$")
++    display_name: str = Field(min_length=1, max_length=120)
++    price_monthly: int = Field(ge=0, le=10_000_00)  # cents, max $10,000
++    currency: str = Field(default="USD", min_length=3, max_length=3)
++    is_active: bool = True
++    sort_order: int = Field(default=0, ge=0)
++    features: dict[str, Any] = Field(default_factory=dict)
++    limits: dict[str, Any] = Field(default_factory=dict)
++    trial_days: int = Field(default=7, ge=0, le=365)
++
++
++class PlanUpdate(BaseModel):
++    display_name: str | None = Field(default=None, min_length=1, max_length=120)
++    price_monthly: int | None = Field(default=None, ge=0, le=10_000_00)
++    currency: str | None = Field(default=None, min_length=3, max_length=3)
++    is_active: bool | None = None
++    sort_order: int | None = Field(default=None, ge=0)
++    features: dict[str, Any] | None = None
++    limits: dict[str, Any] | None = None
++    trial_days: int | None = Field(default=None, ge=0, le=365)
++
++
++class PlanOut(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: uuid.UUID
++    name: str
++    display_name: str
++    price_monthly: int
++    currency: str
++    is_active: bool
++    sort_order: int
++    features: dict[str, Any]
++    limits: dict[str, Any]
++    trial_days: int
++    created_at: datetime
++
++
++# ---------------------------------------------------------------------------
++# Subscriptions
++# ---------------------------------------------------------------------------
++
++
++class SubscriptionOut(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: uuid.UUID
++    agency_id: uuid.UUID
++    plan_id: uuid.UUID
++    status: str
++    price_monthly_snapshot: int
++    currency_snapshot: str
++    plan_name_snapshot: str
++    plan_features_snapshot: dict[str, Any]
++    plan_limits_snapshot: dict[str, Any]
++    started_at: datetime
++    trial_ends_at: datetime | None
++    current_period_ends_at: datetime | None
++    cancelled_at: datetime | None
++    superseded_at: datetime | None
++    created_at: datetime
++
++
++class SubscriptionStatusUpdate(BaseModel):
++    """Super Admin can move a subscription through its lifecycle.
++
++    Allowed transitions are validated server-side via a finite-state
++    transition table (see ``services.billing``).
++    """
++
++    status: str = Field(pattern=r"^(trial|active|past_due|suspended|cancelled|superseded)$")
++    current_period_ends_at: datetime | None = None
++
++
++# ---------------------------------------------------------------------------
++# Payments
++# ---------------------------------------------------------------------------
++
++
++class PaymentOut(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: uuid.UUID
++    subscription_id: uuid.UUID
++    agency_id: uuid.UUID
++    txid: str
++    idempotency_key: str | None
++    amount_expected: int
++    amount_paid: int
++    currency: str
++    paid_currency: str | None
++    paid_amount_raw: int | None
++    paid_amount_decimals: int | None
++    exchange_rate: float | None
++    status: str
++    verifying_lease_until: datetime | None
++    verified_at: datetime | None
++    verified_by_super_admin_id: uuid.UUID | None
++    failure_reason: str | None
++    payment_method: str
++    network: str | None
++    metadata_: dict[str, Any] = Field(default_factory=dict)
++    created_at: datetime
++
++
++class PaymentVerifyRequest(BaseModel):
++    """Super Admin verifies a payment manually (Phase 1: no on-chain verification).
++
++    ``amount_paid`` is in CENTS of the base currency — the Super Admin must
++    convert the on-chain amount using the exchange rate at tx time. The
++    service records the raw on-chain values + decimals + rate for audit.
++    """
++
++    amount_paid: int = Field(ge=0)  # cents, in base currency
++    paid_currency: str | None = Field(default=None, min_length=3, max_length=10)  # ISO 4217 or crypto code (e.g., USDT)
++    paid_amount_raw: int | None = Field(default=None, ge=0)
++    paid_amount_decimals: int | None = Field(default=None, ge=0, le=18)
++    exchange_rate: float | None = Field(default=None, gt=0)
++    network: str | None = Field(default=None, max_length=20)
++    note: str | None = Field(default=None, max_length=500)
++
++
++class PaymentRejectRequest(BaseModel):
++    failure_reason: str = Field(min_length=1, max_length=2000)
++
++
++# ---------------------------------------------------------------------------
++# Platform settings
++# ---------------------------------------------------------------------------
++
++
++class PlatformSettingOut(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++    key: str
++    value: str
++    value_type: str
++    description: str
++    updated_at: datetime
++
++
++class PlatformSettingUpsert(BaseModel):
++    value: str = Field(min_length=0, max_length=10000)
++    value_type: str = Field(default="string", pattern=r"^(string|bool|int|json)$")
++    description: str = Field(default="", max_length=255)
++
++
++# ---------------------------------------------------------------------------
++# Agency notes
++# ---------------------------------------------------------------------------
++
++
++class AgencyNoteCreate(BaseModel):
++    note: str = Field(min_length=1, max_length=5000)
++    is_pinned: bool = False
++
++
++class AgencyNoteOut(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: uuid.UUID
++    agency_id: uuid.UUID
++    super_admin_id: uuid.UUID | None
++    note: str
++    is_pinned: bool
++    created_at: datetime
++
++
++# ---------------------------------------------------------------------------
++# Super Admin audit log
++# ---------------------------------------------------------------------------
++
++
++class SuperAdminAuditLogOut(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: int
++    super_admin_id: uuid.UUID | None
++    action: str
++    target_type: str | None
++    target_id: uuid.UUID | None
++    metadata_: dict[str, Any] = Field(default_factory=dict)
++    ip_address: str | None
++    created_at: datetime
++
++
++__all__ = [
++    "AgencyAdminOut",
++    "AgencyAdminDetailOut",
++    "AgencyUpdateRequest",
++    "AgencyMemberOut",
++    "AgencyMemberRoleUpdate",
++    "PlanCreate",
++    "PlanUpdate",
++    "PlanOut",
++    "SubscriptionOut",
++    "SubscriptionStatusUpdate",
++    "PaymentOut",
++    "PaymentVerifyRequest",
++    "PaymentRejectRequest",
++    "PlatformSettingOut",
++    "PlatformSettingUpsert",
++    "AgencyNoteCreate",
++    "AgencyNoteOut",
++    "SuperAdminAuditLogOut",
++]
+diff --git a/apps/api/app/services/billing.py b/apps/api/app/services/billing.py
+new file mode 100644
+index 0000000..8db0379
+--- /dev/null
++++ b/apps/api/app/services/billing.py
+@@ -0,0 +1,213 @@
++"""Billing service: subscription lifecycle + payment verification.
++
++Pure-Python service layer that the Super Admin API endpoints call into.
++Keeps the endpoint modules thin and lets the business rules be tested
++without going through the HTTP layer.
++
++Subscription lifecycle (Phase 1):
++
++    trial ─→ active ─→ past_due ─→ suspended ─→ cancelled
++                  │            ↑
++                  └→ cancelled ↑
++
++    (any) ─→ superseded   (only via plan-change, not direct update)
++
++Allowed transitions are enforced via the ``ALLOWED_TRANSITIONS`` table
++below — trying to move from e.g. ``cancelled`` back to ``active`` is
++rejected with 400.
++
++Payment verification is idempotent:
++
++  - The ``payments.txid`` column is UNIQUE — a duplicate verify of the
++    same txid returns the existing row's status without mutating.
++  - The verifying Super Admin's id is recorded in
++    ``verified_by_super_admin_id``.
++  - ``amount_paid`` is INTEGER cents — never FLOAT. The raw on-chain
++    amount + decimals + exchange_rate are stored separately so the
++    calculation can be re-audited later.
++"""
++from __future__ import annotations
++
++import uuid
++from datetime import datetime, timezone
++from typing import Iterable
++
++from fastapi import HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..models import Payment, Subscription, SuperAdminAuditLog
++
++
++# ---------------------------------------------------------------------------
++# Subscription lifecycle
++# ---------------------------------------------------------------------------
++
++
++# Allowed "from" → set of allowed "to" states.
++ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
++    "trial":     frozenset({"active", "past_due", "cancelled"}),
++    "active":    frozenset({"past_due", "suspended", "cancelled"}),
++    "past_due":  frozenset({"active", "suspended", "cancelled"}),
++    "suspended": frozenset({"active", "cancelled"}),
++    "cancelled": frozenset(),  # terminal — no transitions out
++    "superseded": frozenset(),  # terminal — only set by plan-change
++}
++
++
++def assert_transition_allowed(current: str, target: str) -> None:
++    """Raise 400 if the transition is not in ``ALLOWED_TRANSITIONS``."""
++    allowed = ALLOWED_TRANSITIONS.get(current, frozenset())
++    if target not in allowed:
++        raise HTTPException(
++            status_code=status.HTTP_400_BAD_REQUEST,
++            detail=f"Subscription cannot move from '{current}' to '{target}'",
++        )
++
++
++def update_subscription_status(
++    db: Session,
++    *,
++    subscription: Subscription,
++    new_status: str,
++    super_admin_id: uuid.UUID,
++    current_period_ends_at: datetime | None = None,
++    ip_address: str | None = None,
++) -> Subscription:
++    """Apply a status transition + audit it. Caller commits."""
++    assert_transition_allowed(subscription.status, new_status)
++    old_status = subscription.status
++    subscription.status = new_status
++    if current_period_ends_at is not None:
++        subscription.current_period_ends_at = current_period_ends_at
++    if new_status == "cancelled":
++        subscription.cancelled_at = datetime.now(timezone.utc)
++    db.flush()
++    db.add(SuperAdminAuditLog(
++        super_admin_id=super_admin_id,
++        action="subscription.update_status",
++        target_type="subscription",
++        target_id=subscription.id,
++        metadata_={"old": old_status, "new": new_status},
++        ip_address=ip_address,
++    ))
++    return subscription
++
++
++# ---------------------------------------------------------------------------
++# Payment verification (idempotent)
++# ---------------------------------------------------------------------------
++
++
++def verify_payment(
++    db: Session,
++    *,
++    payment: Payment,
++    super_admin_id: uuid.UUID,
++    amount_paid_cents: int,
++    paid_currency: str | None = None,
++    paid_amount_raw: int | None = None,
++    paid_amount_decimals: int | None = None,
++    exchange_rate: float | None = None,
++    network: str | None = None,
++    note: str | None = None,
++    ip_address: str | None = None,
++) -> Payment:
++    """Verify a payment. Idempotent — re-verifying returns the same row.
++
++    Idempotency rules:
++      - If the payment is already ``verified``, return it as-is (no mutation).
++      - If the payment is ``rejected`` or ``expired``, raise 409 — those
++        are terminal states and cannot be re-verified.
++      - If the payment is ``pending`` or ``verifying``, mark it ``verified``.
++
++    The ``amount_paid_cents`` argument is the BASE-currency amount the
++    Super Admin calculated using the exchange rate at tx time. The raw
++    on-chain amount + decimals + rate are stored separately for audit.
++    """
++    if payment.status == "verified":
++        return payment  # already verified — idempotent
++    if payment.status in {"rejected", "expired"}:
++        raise HTTPException(
++            status_code=status.HTTP_409_CONFLICT,
++            detail=f"Payment is in terminal state '{payment.status}' — cannot re-verify",
++        )
++
++    now = datetime.now(timezone.utc)
++    payment.amount_paid = amount_paid_cents
++    if paid_currency is not None:
++        payment.paid_currency = paid_currency
++    if paid_amount_raw is not None:
++        payment.paid_amount_raw = paid_amount_raw
++    if paid_amount_decimals is not None:
++        payment.paid_amount_decimals = paid_amount_decimals
++    if exchange_rate is not None:
++        payment.exchange_rate = exchange_rate
++    if network is not None:
++        payment.network = network
++    payment.status = "verified"
++    payment.verified_at = now
++    payment.verified_by_super_admin_id = super_admin_id
++
++    db.flush()
++    db.add(SuperAdminAuditLog(
++        super_admin_id=super_admin_id,
++        action="payment.verify",
++        target_type="payment",
++        target_id=payment.id,
++        metadata_={
++            "amount_paid_cents": amount_paid_cents,
++            "paid_currency": paid_currency,
++            "paid_amount_raw": paid_amount_raw,
++            "paid_amount_decimals": paid_amount_decimals,
++            "exchange_rate": float(exchange_rate) if exchange_rate is not None else None,
++            "network": network,
++            "note": note,
++        },
++        ip_address=ip_address,
++    ))
++    return payment
++
++
++def reject_payment(
++    db: Session,
++    *,
++    payment: Payment,
++    super_admin_id: uuid.UUID,
++    failure_reason: str,
++    ip_address: str | None = None,
++) -> Payment:
++    """Reject a payment. Idempotent — re-rejecting is a no-op."""
++    if payment.status == "rejected":
++        return payment
++    if payment.status == "verified":
++        raise HTTPException(
++            status_code=status.HTTP_409_CONFLICT,
++            detail="Payment is already verified — cannot reject",
++        )
++    if payment.status == "expired":
++        raise HTTPException(
++            status_code=status.HTTP_409_CONFLICT,
++            detail="Payment is expired — cannot reject",
++        )
++    payment.status = "rejected"
++    payment.failure_reason = failure_reason
++    db.flush()
++    db.add(SuperAdminAuditLog(
++        super_admin_id=super_admin_id,
++        action="payment.reject",
++        target_type="payment",
++        target_id=payment.id,
++        metadata_={"failure_reason": failure_reason},
++        ip_address=ip_address,
++    ))
++    return payment
++
++
++__all__ = [
++    "ALLOWED_TRANSITIONS",
++    "assert_transition_allowed",
++    "update_subscription_status",
++    "verify_payment",
++    "reject_payment",
++]
+diff --git a/apps/api/migrations/versions/0008_create_sa_runner_role.py b/apps/api/migrations/versions/0008_create_sa_runner_role.py
+new file mode 100644
+index 0000000..0e770cc
+--- /dev/null
++++ b/apps/api/migrations/versions/0008_create_sa_runner_role.py
+@@ -0,0 +1,82 @@
++"""Migration 0008: Create m369_sa_runner — LOGIN role with BYPASSRLS.
++
++The Super Admin API endpoints need to read/write across all tenants (e.g.
++list all agencies, suspend an agency, verify a payment for a different
++agency). The ordinary ``m369_app`` role is subject to RLS — every query is
++filtered by ``app.tenant_id``. So Super Admin operations use a separate
++database connection with the ``m369_sa_runner`` role.
++
++``m369_sa_runner``:
++  - LOGIN (so the API can connect as it)
++  - NOSUPERUSER (cannot create databases, roles, or replicate)
++  - BYPASSRLS (every SELECT/INSERT/UPDATE/DELETE skips RLS policies)
++  - NOCREATEDB, NOCREATEROLE, NOREPLICATION
++
++The role's password is provisioned externally via the bootstrap SQL
++(``infrastructure/database/01-bootstrap-roles.sql``) — the migration
++only ensures the role exists with the right attribute combination.
++This means the migration is safe to run in any environment without
++leaking credentials.
++
++Default privileges: grants CRUD on all current + future tables to
++``m369_sa_runner``. Same grants as ``m369_app`` plus BYPASSRLS.
++
++The corresponding SQLAlchemy engine is ``super_admin_engine`` in
++``app/db/database.py``. The URL comes from ``DATABASE_URL_SUPER_ADMIN``
++(a separate env var never shared with the migration service).
++"""
++from __future__ import annotations
++
++from typing import Sequence, Union
++
++from alembic import op
++
++
++revision: str = "0008_create_sa_runner_role"
++down_revision: Union[str, None] = "0007_fix_login_reader_acl"
++branch_labels: Union[str, Sequence[str], None] = None
++depends_on: Union[str, Sequence[str], None] = None
++
++
++def upgrade() -> None:
++    # 1. Create the role if missing. NOLOGIN as written in the migration
++    #    would not be usable; we explicitly want LOGIN here. The bootstrap
++    #    SQL (or environment provisioning) sets the password.
++    op.execute(
++        "DO $$ BEGIN "
++        "CREATE ROLE m369_sa_runner LOGIN NOSUPERUSER BYPASSRLS "
++        "  NOCREATEDB NOCREATEROLE NOREPLICATION; "
++        "EXCEPTION WHEN duplicate_object THEN "
++        "  ALTER ROLE m369_sa_runner NOSUPERUSER BYPASSRLS "
++        "  NOCREATEDB NOCREATEROLE NOREPLICATION; "
++        "END $$"
++    )
++
++    # 2. CRUD on every existing table.
++    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO m369_sa_runner")
++    op.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO m369_sa_runner")
++
++    # 3. Default privileges for future tables created by postgres — so a
++    #    later migration that does CREATE TABLE doesn't accidentally leave
++    #    m369_sa_runner without access (which would surface as 500s in prod).
++    op.execute(
++        "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public "
++        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO m369_sa_runner"
++    )
++    op.execute(
++        "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public "
++        "GRANT USAGE, SELECT ON SEQUENCES TO m369_sa_runner"
++    )
++
++
++def downgrade() -> None:
++    # Do NOT drop the role — it may have dependent grants. Just revoke
++    # the default privileges; table-level grants are left in place.
++    op.execute(
++        "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public "
++        "REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM m369_sa_runner"
++    )
++    op.execute(
++        "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public "
++        "REVOKE USAGE, SELECT ON SEQUENCES FROM m369_sa_runner"
++    )
+diff --git a/apps/api/migrations/versions/0009_widen_paid_currency.py b/apps/api/migrations/versions/0009_widen_paid_currency.py
+new file mode 100644
+index 0000000..fba0436
+--- /dev/null
++++ b/apps/api/migrations/versions/0009_widen_paid_currency.py
+@@ -0,0 +1,39 @@
++"""Migration 0009: Widen payments.paid_currency to String(10).
++
++Migration 0006 created ``payments.paid_currency`` as ``String(3)`` which
++is correct for ISO 4217 fiat codes (USD, EUR, IRR...). But for crypto
++payments — the primary Phase 1 billing method — the on-chain code is
++``USDT`` (4 chars). Rejecting these as too long was a real bug.
++
++This migration widens the column to ``String(10)`` which comfortably
++fits both ISO 4217 and any current/future crypto ticker (USDT, USDC,
++DAI, WBTC, ETH...). No data is lost — VARCHAR widening is non-breaking.
++"""
++from __future__ import annotations
++
++from typing import Sequence, Union
++
++from alembic import op
++import sqlalchemy as sa
++
++
++revision: str = "0009_widen_paid_currency"
++down_revision: Union[str, None] = "0008_create_sa_runner_role"
++branch_labels: Union[str, Sequence[str], None] = None
++depends_on: Union[str, Sequence[str], None] = None
++
++
++def upgrade() -> None:
++    op.alter_column(
++        "payments",
++        "paid_currency",
++        existing_type=sa.String(3),
++        type_=sa.String(10),
++        existing_nullable=True,
++    )
++
++
++def downgrade() -> None:
++    # Re-widening on downgrade would silently truncate USDT → USD which
++    # is data-corrupting. Downgrade is therefore a no-op by design.
++    pass
+diff --git a/apps/api/tests/conftest.py b/apps/api/tests/conftest.py
+index 6fdc6a2..c3ff1b3 100644
+--- a/apps/api/tests/conftest.py
++++ b/apps/api/tests/conftest.py
+@@ -28,11 +28,14 @@ from sqlalchemy.orm import Session
+ 
+ # Runtime: m369_app (least-privilege)
+ # Setup/migration: postgres (superuser)
++# Super Admin runtime: m369_sa_runner (BYPASSRLS, NOSUPERUSER)
+ M369_APP_DB_URL = "postgresql+psycopg://m369_app:m369_app_dev_password@localhost:5432/m369_support_test"
+ SETUP_DB_URL = "postgresql+psycopg://postgres@localhost:5432/m369_support_test"
++SA_DB_URL = "postgresql+psycopg://m369_sa_runner:m369_sa_runner_dev_password@localhost:5432/m369_support_test"
+ 
+ os.environ["DATABASE_URL"] = M369_APP_DB_URL
+ os.environ["TEST_DATABASE_URL"] = SETUP_DB_URL
++os.environ["DATABASE_URL_SUPER_ADMIN"] = SA_DB_URL
+ os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
+ os.environ.setdefault("ENVIRONMENT", "test")
+ 
+@@ -79,7 +82,7 @@ def db_engine():
+     if not HAVE_PG:
+         pytest.fail("PostgreSQL test database unavailable — cannot run security tests")
+ 
+-    # Clean slate: drop schema, recreate, ensure m369_app role exists
++    # Clean slate: drop schema, recreate, ensure m369_app + m369_sa_runner exist
+     with setup_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+         conn.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE")
+         conn.exec_driver_sql("CREATE SCHEMA public")
+@@ -93,6 +96,18 @@ def db_engine():
+         )
+         conn.exec_driver_sql("GRANT ALL ON SCHEMA public TO m369_app")
+ 
++        # Ensure m369_sa_runner exists (LOGIN, BYPASSRLS, NOSUPERUSER)
++        # Migration 0008 attempts to create it but cannot set its password,
++        # so we provision the password here for tests.
++        conn.exec_driver_sql(
++            "DO $$ BEGIN CREATE ROLE m369_sa_runner LOGIN PASSWORD 'm369_sa_runner_dev_password' "
++            "NOSUPERUSER BYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION; "
++            "EXCEPTION WHEN duplicate_object THEN "
++            "ALTER ROLE m369_sa_runner LOGIN PASSWORD 'm369_sa_runner_dev_password' "
++            "NOSUPERUSER BYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION; END $$"
++        )
++        conn.exec_driver_sql("GRANT ALL ON SCHEMA public TO m369_sa_runner")
++
+     # Run Alembic migration as postgres (superuser — owns tables)
+     api_dir = Path(__file__).resolve().parents[1]
+     result = subprocess.run(
+@@ -150,6 +165,26 @@ def setup_session(db_engine) -> Iterator[Session]:
+                 "workspaces, agencies, super_admins, super_admin_audit_logs "
+                 "RESTART IDENTITY CASCADE"
+             )
++            # Re-seed the 4 default plans (migration 0006 originally seeds
++            # them with ON CONFLICT DO NOTHING, but TRUNCATE wipes them and
++            # the migration doesn't re-run between tests).
++            c.exec_driver_sql(
++                "INSERT INTO plans (id, name, display_name, price_monthly, currency, is_active, sort_order, features, limits, trial_days) "
++                "VALUES "
++                "(gen_random_uuid(), 'starter', 'Starter', 1900, 'USD', true, 1, "
++                "'{\"channels\":[\"widget\"]}'::jsonb, "
++                "'{\"max_seats\":3,\"max_conversations\":500,\"max_workspaces\":1}'::jsonb, 7), "
++                "(gen_random_uuid(), 'growth', 'Growth', 4900, 'USD', true, 2, "
++                "'{\"channels\":[\"widget\",\"whatsapp_cloud\"]}'::jsonb, "
++                "'{\"max_seats\":6,\"max_conversations\":2000,\"max_workspaces\":3}'::jsonb, 7), "
++                "(gen_random_uuid(), 'pro', 'Pro', 7900, 'USD', true, 3, "
++                "'{\"channels\":[\"widget\",\"whatsapp_cloud\",\"email\",\"telegram\"]}'::jsonb, "
++                "'{\"max_seats\":9,\"max_conversations\":6000,\"max_workspaces\":5}'::jsonb, 7), "
++                "(gen_random_uuid(), 'vip', 'VIP', 9900, 'USD', true, 4, "
++                "'{\"channels\":[\"widget\",\"whatsapp_cloud\",\"email\",\"telegram\",\"instagram\",\"messenger\"],\"whitelabel\":true}'::jsonb, "
++                "'{\"max_seats\":12,\"max_conversations\":15000,\"max_workspaces\":99}'::jsonb, 7) "
++                "ON CONFLICT (name) DO NOTHING"
++            )
+         conn.close()
+ 
+ 
+@@ -171,7 +206,12 @@ def db_session(db_engine) -> Iterator[Session]:
+ 
+ @pytest.fixture
+ def client(setup_session: Session, db_session: Session) -> Iterator[TestClient]:
+-    """FastAPI TestClient with get_db overridden to use the test session (m369_app)."""
++    """FastAPI TestClient with get_db overridden to use the test session (m369_app).
++
++    For Super Admin endpoints we DON'T override get_super_admin_db — the
++    super_admin_engine connects via DATABASE_URL_SUPER_ADMIN env var to
++    the real m369_sa_runner role, exercising the actual BYPASSRLS path.
++    """
+     def _override_get_db():
+         try:
+             yield db_session
+@@ -184,6 +224,52 @@ def client(setup_session: Session, db_session: Session) -> Iterator[TestClient]:
+     app.dependency_overrides.clear()
+ 
+ 
++# ---------------------------------------------------------------------------
++# Super Admin fixtures
++# ---------------------------------------------------------------------------
++
++
++@pytest.fixture(scope="session")
++def sa_engine():
++    """Engine connected as m369_sa_runner (BYPASSRLS). Used for SA assertions."""
++    return create_engine(SA_DB_URL, pool_pre_ping=True)
++
++
++@pytest.fixture
++def super_admin(setup_session: Session):
++    """Create a Super Admin + return (admin, token)."""
++    from app.models import SuperAdmin
++    from app.security import create_access_token, hash_password
++
++    admin = SuperAdmin(
++        email=f"sa-{uuid.uuid4().hex[:6]}@m369.platform",
++        name="Super Admin",
++        password_hash=hash_password("super-admin-password-123"),
++        is_active=True,
++    )
++    setup_session.add(admin)
++    setup_session.commit()
++    setup_session.refresh(admin)
++    token = create_access_token(subject=str(admin.id), token_type="super_admin")
++    return admin, token
++
++
++@pytest.fixture
++def sa_token(super_admin):
++    return super_admin[1]
++
++
++@pytest.fixture
++def sa_client(client):
++    """Same TestClient, just a clearer name when used for Super Admin tests.
++
++    The TestClient uses cookies to carry the Super Admin token (the auth
++    endpoint sets it automatically). For raw header auth, pass the token
++    explicitly in the Authorization header.
++    """
++    return client
++
++
+ def _register_agency(setup_session: Session, name: str, email: str, password: str = "test-password-123") -> tuple[Agency, User, str]:
+     """Register an agency + owner using the setup session (postgres, bypasses RLS)."""
+     from app.slugs import unique_slug
+diff --git a/apps/api/tests/integration/test_stage3_super_admin_billing.py b/apps/api/tests/integration/test_stage3_super_admin_billing.py
+new file mode 100644
+index 0000000..33bb5eb
+--- /dev/null
++++ b/apps/api/tests/integration/test_stage3_super_admin_billing.py
+@@ -0,0 +1,644 @@
++"""Stage 3 — Super Admin endpoints + billing/subscription/payment APIs.
++
++Tests:
++  1. Super Admin token separation — agency token cannot call SA endpoints.
++  2. Agency management — list/get/update/suspend/activate, RBAC enforced.
++  3. Member management — list, role change.
++  4. Plans CRUD — create/update/list.
++  5. Subscriptions — list/get + lifecycle transitions enforced.
++  6. Payments — list/get + idempotent verification + reject terminal state.
++  7. Platform settings — upsert/delete.
++  8. Agency notes — create/list/delete.
++  9. Super Admin audit log — every mutation writes a row.
++"""
++from __future__ import annotations
++
++import uuid
++from datetime import datetime, timedelta, timezone
++
++import pytest
++from fastapi.testclient import TestClient
++from sqlalchemy import select, text
++from sqlalchemy.orm import Session
++
++from app.models import (
++    Agency,
++    AgencyMembership,
++    AgencyNote,
++    Payment,
++    Plan,
++    PlatformSetting,
++    Subscription,
++    SuperAdmin,
++    SuperAdminAuditLog,
++    User,
++)
++from app.security import create_access_token, hash_password
++
++
++pytestmark = pytest.mark.security
++
++
++def _sa_headers(token: str) -> dict[str, str]:
++    return {"Authorization": f"Bearer {token}"}
++
++
++def _make_plan(setup: Session, name: str = "test-plan", price_cents: int = 1900) -> Plan:
++    p = Plan(
++        name=name,
++        display_name=name.title(),
++        price_monthly=price_cents,
++        currency="USD",
++        is_active=True,
++        sort_order=0,
++        features={"channels": ["widget"]},
++        limits={"max_seats": 3},
++        trial_days=7,
++    )
++    setup.add(p)
++    setup.commit()
++    setup.refresh(p)
++    return p
++
++
++def _make_subscription(setup: Session, agency: Agency, plan: Plan, status: str = "trial") -> Subscription:
++    s = Subscription(
++        agency_id=agency.id,
++        plan_id=plan.id,
++        status=status,
++        price_monthly_snapshot=plan.price_monthly,
++        currency_snapshot=plan.currency,
++        plan_name_snapshot=plan.display_name,
++        plan_features_snapshot=plan.features,
++        plan_limits_snapshot=plan.limits,
++        trial_ends_at=datetime.now(timezone.utc) + timedelta(days=7),
++    )
++    setup.add(s)
++    setup.commit()
++    setup.refresh(s)
++    return s
++
++
++def _make_payment(setup: Session, sub: Subscription, agency: Agency, txid: str, amount_cents: int = 1900) -> Payment:
++    p = Payment(
++        subscription_id=sub.id,
++        agency_id=agency.id,
++        txid=txid,
++        idempotency_key=f"idem-{txid}",
++        amount_expected=amount_cents,
++        amount_paid=0,
++        currency="USD",
++        status="pending",
++        payment_method="crypto_usdt_trc20",
++    )
++    setup.add(p)
++    setup.commit()
++    setup.refresh(p)
++    return p
++
++
++# ---------------------------------------------------------------------------
++# 1. Token separation — agency token cannot call Super Admin endpoints
++# ---------------------------------------------------------------------------
++
++
++def test_agency_token_cannot_call_super_admin(client: TestClient, agency_a, sa_token):
++    """An agency-scoped JWT must be rejected by every Super Admin endpoint."""
++    a, _, tok_a = agency_a
++    # Agency token tries to list all agencies via Super Admin
++    r = client.get("/api/v1/super-admin/agencies", headers=_sa_headers(tok_a))
++    assert r.status_code == 401, f"agency token accepted by SA: {r.status_code}: {r.text}"
++
++
++def test_super_admin_token_cannot_call_agency_endpoints(client: TestClient, agency_a, sa_token):
++    """A Super Admin JWT must be rejected by agency-scoped endpoints."""
++    r = client.get("/api/v1/contacts", headers=_sa_headers(sa_token))
++    # 403 because the super_admin token is decoded by both decoders, but
++    # get_current_user rejects it explicitly.
++    assert r.status_code == 403, f"SA token accepted by agency endpoint: {r.status_code}"
++
++
++def test_unauthenticated_super_admin_rejected(client: TestClient):
++    r = client.get("/api/v1/super-admin/agencies")
++    assert r.status_code == 401
++
++
++# ---------------------------------------------------------------------------
++# 2. Agency management
++# ---------------------------------------------------------------------------
++
++
++def test_sa_list_agencies_returns_all(client: TestClient, setup_session: Session, agency_a, agency_b, sa_token):
++    """Super Admin sees ALL agencies (BYPASSRLS via m369_sa_runner)."""
++    r = client.get("/api/v1/super-admin/agencies", headers=_sa_headers(sa_token))
++    assert r.status_code == 200, r.text
++    body = r.json()
++    assert body["total"] >= 2
++    names = {a["name"] for a in body["items"]}
++    assert {"Agency A", "Agency B"}.issubset(names)
++
++
++def test_sa_get_agency_detail(client: TestClient, agency_a, sa_token):
++    a, _, _ = agency_a
++    r = client.get(f"/api/v1/super-admin/agencies/{a.id}", headers=_sa_headers(sa_token))
++    assert r.status_code == 200, r.text
++    body = r.json()
++    assert body["id"] == str(a.id)
++    assert body["name"] == "Agency A"
++
++
++def test_sa_update_agency_name(client: TestClient, agency_a, sa_token):
++    a, _, _ = agency_a
++    r = client.patch(
++        f"/api/v1/super-admin/agencies/{a.id}",
++        headers=_sa_headers(sa_token),
++        json={"name": "Renamed Agency"},
++    )
++    assert r.status_code == 200, r.text
++    assert r.json()["name"] == "Renamed Agency"
++
++
++def test_sa_suspend_agency_idempotent(client: TestClient, setup_session: Session, agency_a, sa_token):
++    a, _, _ = agency_a
++    r1 = client.post(f"/api/v1/super-admin/agencies/{a.id}/suspend", headers=_sa_headers(sa_token))
++    assert r1.status_code == 200, r1.text
++    assert r1.json()["is_active"] is False
++    # Second suspend is idempotent
++    r2 = client.post(f"/api/v1/super-admin/agencies/{a.id}/suspend", headers=_sa_headers(sa_token))
++    assert r2.status_code == 200
++    assert r2.json()["is_active"] is False
++    # Audit log records the suspend
++    rows = setup_session.execute(
++        text("SELECT action FROM super_admin_audit_logs WHERE action = 'agency.suspend'")
++    ).all()
++    assert len(rows) >= 1
++
++
++def test_sa_activate_agency(client: TestClient, agency_a, sa_token):
++    a, _, _ = agency_a
++    # Suspend first
++    client.post(f"/api/v1/super-admin/agencies/{a.id}/suspend", headers=_sa_headers(sa_token))
++    # Then activate
++    r = client.post(f"/api/v1/super-admin/agencies/{a.id}/activate", headers=_sa_headers(sa_token))
++    assert r.status_code == 200
++    assert r.json()["is_active"] is True
++
++
++def test_sa_agency_404_for_unknown_id(client: TestClient, sa_token):
++    fake = uuid.uuid4()
++    r = client.get(f"/api/v1/super-admin/agencies/{fake}", headers=_sa_headers(sa_token))
++    assert r.status_code == 404
++
++
++# ---------------------------------------------------------------------------
++# 3. Member management
++# ---------------------------------------------------------------------------
++
++
++def test_sa_list_agency_members(client: TestClient, setup_session: Session, agency_a, sa_token):
++    a, _, _ = agency_a
++    # Add another member with 'agent' role
++    u = User(email="agent@agency-a.com", password_hash=hash_password("x"), name="Agent")
++    m = AgencyMembership(user=u, agency=a, role="agent")
++    setup_session.add_all([u, m])
++    setup_session.commit()
++
++    r = client.get(f"/api/v1/super-admin/agencies/{a.id}/members", headers=_sa_headers(sa_token))
++    assert r.status_code == 200, r.text
++    body = r.json()
++    assert len(body) == 2
++    roles = {m["role"] for m in body}
++    assert roles == {"owner", "agent"}
++
++
++def test_sa_change_member_role(client: TestClient, setup_session: Session, agency_a, sa_token):
++    a, owner, _ = agency_a
++    r = client.patch(
++        f"/api/v1/super-admin/agencies/{a.id}/members/{owner.id}",
++        headers=_sa_headers(sa_token),
++        json={"role": "admin"},
++    )
++    assert r.status_code == 200, r.text
++    assert r.json()["role"] == "admin"
++
++
++# ---------------------------------------------------------------------------
++# 4. Plans CRUD
++# ---------------------------------------------------------------------------
++
++
++def test_sa_create_plan(client: TestClient, sa_token):
++    r = client.post(
++        "/api/v1/super-admin/plans",
++        headers=_sa_headers(sa_token),
++        json={
++            "name": "test-plan-create",
++            "display_name": "Test Plan",
++            "price_monthly": 2999,
++            "currency": "USD",
++            "is_active": True,
++            "sort_order": 10,
++            "features": {"channels": ["widget"]},
++            "limits": {"max_seats": 5},
++            "trial_days": 14,
++        },
++    )
++    assert r.status_code == 201, r.text
++    body = r.json()
++    assert body["name"] == "test-plan-create"
++    assert body["price_monthly"] == 2999
++    assert body["trial_days"] == 14
++
++
++def test_sa_create_plan_duplicate_409(client: TestClient, sa_token):
++    body = {"name": "test-dup-plan", "display_name": "Dup", "price_monthly": 100}
++    r1 = client.post("/api/v1/super-admin/plans", headers=_sa_headers(sa_token), json=body)
++    assert r1.status_code == 201
++    r2 = client.post("/api/v1/super-admin/plans", headers=_sa_headers(sa_token), json=body)
++    assert r2.status_code == 409
++
++
++def test_sa_list_plans_includes_seeded(client: TestClient, sa_token):
++    """Migration 0006 seeded 4 plans: starter, growth, pro, vip."""
++    r = client.get("/api/v1/super-admin/plans", headers=_sa_headers(sa_token))
++    assert r.status_code == 200, r.text
++    names = {p["name"] for p in r.json()["items"]}
++    assert {"starter", "growth", "pro", "vip"}.issubset(names)
++
++
++def test_sa_update_plan_price(client: TestClient, setup_session: Session, sa_token):
++    plan = _make_plan(setup_session, name="update-test-plan", price_cents=1000)
++    r = client.patch(
++        f"/api/v1/super-admin/plans/{plan.id}",
++        headers=_sa_headers(sa_token),
++        json={"price_monthly": 1500, "display_name": "Updated"},
++    )
++    assert r.status_code == 200, r.text
++    assert r.json()["price_monthly"] == 1500
++    assert r.json()["display_name"] == "Updated"
++
++
++# ---------------------------------------------------------------------------
++# 5. Subscriptions + lifecycle transitions
++# ---------------------------------------------------------------------------
++
++
++def test_sa_list_subscriptions(client: TestClient, setup_session: Session, agency_a, sa_token):
++    a, _, _ = agency_a
++    plan = _make_plan(setup_session, name="sub-test-plan")
++    _make_subscription(setup_session, a, plan, status="trial")
++
++    r = client.get("/api/v1/super-admin/subscriptions", headers=_sa_headers(sa_token))
++    assert r.status_code == 200, r.text
++    assert r.json()["total"] >= 1
++
++
++def test_sa_subscription_transition_trial_to_active(client: TestClient, setup_session: Session, agency_a, sa_token):
++    a, _, _ = agency_a
++    plan = _make_plan(setup_session, name="trans-test-plan")
++    sub = _make_subscription(setup_session, a, plan, status="trial")
++
++    r = client.patch(
++        f"/api/v1/super-admin/subscriptions/{sub.id}",
++        headers=_sa_headers(sa_token),
++        json={"status": "active", "current_period_ends_at": "2026-12-31T23:59:59Z"},
++    )
++    assert r.status_code == 200, r.text
++    assert r.json()["status"] == "active"
++
++
++def test_sa_subscription_rejects_invalid_transition(client: TestClient, setup_session: Session, agency_a, sa_token):
++    """cancelled → active is NOT allowed (cancelled is terminal)."""
++    a, _, _ = agency_a
++    plan = _make_plan(setup_session, name="invalid-trans-plan")
++    sub = _make_subscription(setup_session, a, plan, status="cancelled")
++
++    r = client.patch(
++        f"/api/v1/super-admin/subscriptions/{sub.id}",
++        headers=_sa_headers(sa_token),
++        json={"status": "active"},
++    )
++    assert r.status_code == 400, f"expected 400 for invalid transition, got {r.status_code}: {r.text}"
++
++
++def test_sa_subscription_price_snapshot_preserved(client: TestClient, setup_session: Session, agency_a, sa_token):
++    """If the plan's price changes after subscription creation, the
++    subscription's price_monthly_snapshot must NOT change."""
++    a, _, _ = agency_a
++    plan = _make_plan(setup_session, name="snapshot-test-plan", price_cents=1900)
++    sub = _make_subscription(setup_session, a, plan, status="trial")
++    # Now change the plan price
++    plan.price_monthly = 9999
++    setup_session.commit()
++
++    r = client.get(f"/api/v1/super-admin/subscriptions/{sub.id}", headers=_sa_headers(sa_token))
++    body = r.json()
++    assert body["price_monthly_snapshot"] == 1900, "snapshot leaked plan's new price"
++
++
++# ---------------------------------------------------------------------------
++# 6. Payments — idempotent verify, terminal state, financial precision
++# ---------------------------------------------------------------------------
++
++
++def test_sa_payment_verify_idempotent(client: TestClient, setup_session: Session, agency_a, sa_token, super_admin):
++    """Re-verifying an already-verified payment is a no-op."""
++    a, _, _ = agency_a
++    sa, _ = super_admin
++    plan = _make_plan(setup_session, name="pay-test-plan")
++    sub = _make_subscription(setup_session, a, plan, status="active")
++    pay = _make_payment(setup_session, sub, a, txid="tx-verify-1", amount_cents=1900)
++
++    r1 = client.post(
++        f"/api/v1/super-admin/payments/{pay.id}/verify",
++        headers=_sa_headers(sa_token),
++        json={
++            "amount_paid": 1900,
++            "paid_currency": "USDT",
++            "paid_amount_raw": 1900000000,
++            "paid_amount_decimals": 6,
++            "exchange_rate": 1.0,
++            "network": "tron",
++        },
++    )
++    assert r1.status_code == 200, r1.text
++    assert r1.json()["status"] == "verified"
++    assert r1.json()["amount_paid"] == 1900
++    assert r1.json()["verified_by_super_admin_id"] == str(sa.id)
++
++    # Verify again — should be idempotent
++    r2 = client.post(
++        f"/api/v1/super-admin/payments/{pay.id}/verify",
++        headers=_sa_headers(sa_token),
++        json={"amount_paid": 9999},  # different value, but should be ignored
++    )
++    assert r2.status_code == 200
++    assert r2.json()["amount_paid"] == 1900, "idempotent re-verify mutated amount_paid"
++
++
++def test_sa_payment_verify_rejects_rejected_state(client: TestClient, setup_session: Session, agency_a, sa_token):
++    """Cannot verify a payment that is already in 'rejected' state."""
++    a, _, _ = agency_a
++    plan = _make_plan(setup_session, name="reject-test-plan")
++    sub = _make_subscription(setup_session, a, plan, status="active")
++    pay = _make_payment(setup_session, sub, a, txid="tx-reject-1")
++    pay.status = "rejected"
++    pay.failure_reason = "insufficient funds"
++    setup_session.commit()
++
++    r = client.post(
++        f"/api/v1/super-admin/payments/{pay.id}/verify",
++        headers=_sa_headers(sa_token),
++        json={"amount_paid": 1900},
++    )
++    assert r.status_code == 409
++
++
++def test_sa_payment_reject_after_verify_blocked(client: TestClient, setup_session: Session, agency_a, sa_token):
++    """Cannot reject a payment that is already verified."""
++    a, _, _ = agency_a
++    plan = _make_plan(setup_session, name="block-reject-plan")
++    sub = _make_subscription(setup_session, a, plan, status="active")
++    pay = _make_payment(setup_session, sub, a, txid="tx-block-1")
++    pay.status = "verified"
++    pay.amount_paid = 1900
++    setup_session.commit()
++
++    r = client.post(
++        f"/api/v1/super-admin/payments/{pay.id}/reject",
++        headers=_sa_headers(sa_token),
++        json={"failure_reason": "changed my mind"},
++    )
++    assert r.status_code == 409
++
++
++def test_sa_payment_txid_unique(client: TestClient, setup_session: Session, agency_a, sa_token):
++    """Two payments cannot share the same txid (UNIQUE constraint)."""
++    a, _, _ = agency_a
++    plan = _make_plan(setup_session, name="txid-unique-plan")
++    sub = _make_subscription(setup_session, a, plan, status="active")
++    _make_payment(setup_session, sub, a, txid="duplicate-txid")
++
++    # Insert second payment with same txid — should fail at DB level
++    pay2 = Payment(
++        subscription_id=sub.id,
++        agency_id=a.id,
++        txid="duplicate-txid",
++        amount_expected=1900,
++        amount_paid=0,
++        currency="USD",
++        status="pending",
++    )
++    setup_session.add(pay2)
++    with pytest.raises(Exception) as exc:
++        setup_session.commit()
++    assert "unique" in str(exc.value).lower() or "duplicate" in str(exc.value).lower()
++    setup_session.rollback()
++
++
++def test_sa_payment_financial_precision_integer_cents(client: TestClient, setup_session: Session, agency_a, sa_token):
++    """All money columns are INTEGER cents — never FLOAT.
++
++    Verify that $19.99 is stored as 1999, not 19.99.
++    """
++    a, _, _ = agency_a
++    plan = _make_plan(setup_session, name="precision-plan", price_cents=1999)
++    sub = _make_subscription(setup_session, a, plan, status="active")
++    pay = _make_payment(setup_session, sub, a, txid="tx-precision", amount_cents=1999)
++
++    # Verify with USDT TRC20 (6 decimals): 19.99 USDT = 19990000 raw
++    r = client.post(
++        f"/api/v1/super-admin/payments/{pay.id}/verify",
++        headers=_sa_headers(sa_token),
++        json={
++            "amount_paid": 1999,
++            "paid_currency": "USDT",
++            "paid_amount_raw": 19990000,
++            "paid_amount_decimals": 6,
++            "exchange_rate": 1.0,
++        },
++    )
++    assert r.status_code == 200, r.text
++    body = r.json()
++    assert body["amount_paid"] == 1999  # integer cents
++    assert body["paid_amount_raw"] == 19990000  # raw integer from blockchain
++    assert body["paid_amount_decimals"] == 6
++    # exchange_rate comes back as float (Numeric) — verify it's stored correctly
++    assert body["exchange_rate"] == 1.0
++
++
++# ---------------------------------------------------------------------------
++# 7. Platform settings
++# ---------------------------------------------------------------------------
++
++
++def test_sa_platform_settings_crud(client: TestClient, sa_token):
++    # Upsert
++    r1 = client.put(
++        "/api/v1/super-admin/platform-settings/test_key",
++        headers=_sa_headers(sa_token),
++        json={"value": "test_value", "value_type": "string", "description": "a test"},
++    )
++    assert r1.status_code == 200, r1.text
++    assert r1.json()["value"] == "test_value"
++
++    # List
++    r2 = client.get("/api/v1/super-admin/platform-settings", headers=_sa_headers(sa_token))
++    assert r2.status_code == 200
++    keys = {s["key"] for s in r2.json()}
++    assert "test_key" in keys
++
++    # Update
++    r3 = client.put(
++        "/api/v1/super-admin/platform-settings/test_key",
++        headers=_sa_headers(sa_token),
++        json={"value": "updated_value", "value_type": "string", "description": "updated"},
++    )
++    assert r3.status_code == 200
++    assert r3.json()["value"] == "updated_value"
++
++    # Delete
++    r4 = client.delete(
++        "/api/v1/super-admin/platform-settings/test_key",
++        headers=_sa_headers(sa_token),
++    )
++    assert r4.status_code == 204
++
++
++# ---------------------------------------------------------------------------
++# 8. Agency notes
++# ---------------------------------------------------------------------------
++
++
++def test_sa_agency_notes_crud(client: TestClient, setup_session: Session, agency_a, sa_token, super_admin):
++    a, _, _ = agency_a
++    sa, _ = super_admin
++
++    # Create
++    r1 = client.post(
++        f"/api/v1/super-admin/agencies/{a.id}/notes",
++        headers=_sa_headers(sa_token),
++        json={"note": "VIP customer — handle with care", "is_pinned": True},
++    )
++    assert r1.status_code == 201, r1.text
++    note_id = r1.json()["id"]
++    assert r1.json()["is_pinned"] is True
++    assert r1.json()["super_admin_id"] == str(sa.id)
++
++    # List (pinned first)
++    r2 = client.get(f"/api/v1/super-admin/agencies/{a.id}/notes", headers=_sa_headers(sa_token))
++    assert r2.status_code == 200
++    assert len(r2.json()) == 1
++
++    # Delete
++    r3 = client.delete(
++        f"/api/v1/super-admin/agencies/{a.id}/notes/{note_id}",
++        headers=_sa_headers(sa_token),
++    )
++    assert r3.status_code == 204
++
++
++def test_sa_agency_notes_invisible_to_agency_users(client: TestClient, setup_session: Session, agency_a, sa_token):
++    """Agency notes are stored in agency_notes table — only Super Admin APIs
++    can read/write. Agency users have no endpoint to access them.
++
++    Defense-in-depth: even if an agency user got the SA endpoint URL, the
++    SA auth dependency would reject their token (test_agency_token_cannot_call_super_admin).
++    """
++    a, _, tok_a = agency_a
++    # Create a note as Super Admin
++    client.post(
++        f"/api/v1/super-admin/agencies/{a.id}/notes",
++        headers=_sa_headers(sa_token),
++        json={"note": "internal note"},
++    )
++    # Agency token cannot list notes via SA endpoint
++    r = client.get(f"/api/v1/super-admin/agencies/{a.id}/notes", headers=_sa_headers(tok_a))
++    assert r.status_code == 401
++
++
++# ---------------------------------------------------------------------------
++# 9. Super Admin audit log
++# ---------------------------------------------------------------------------
++
++
++def test_sa_audit_log_records_agency_suspend(client: TestClient, setup_session: Session, agency_a, sa_token):
++    a, _, _ = agency_a
++    client.post(f"/api/v1/super-admin/agencies/{a.id}/suspend", headers=_sa_headers(sa_token))
++
++    r = client.get(
++        "/api/v1/super-admin/audit-logs?action=agency.suspend",
++        headers=_sa_headers(sa_token),
++    )
++    assert r.status_code == 200, r.text
++    body = r.json()
++    assert body["total"] >= 1
++    assert all(item["action"] == "agency.suspend" for item in body["items"])
++
++
++def test_sa_audit_log_records_payment_verify(client: TestClient, setup_session: Session, agency_a, sa_token):
++    a, _, _ = agency_a
++    plan = _make_plan(setup_session, name="audit-pay-plan")
++    sub = _make_subscription(setup_session, a, plan, status="active")
++    pay = _make_payment(setup_session, sub, a, txid="tx-audit-1")
++
++    client.post(
++        f"/api/v1/super-admin/payments/{pay.id}/verify",
++        headers=_sa_headers(sa_token),
++        json={"amount_paid": 1900, "exchange_rate": 1.0},
++    )
++
++    r = client.get(
++        "/api/v1/super-admin/audit-logs?action=payment.verify",
++        headers=_sa_headers(sa_token),
++    )
++    body = r.json()
++    assert body["total"] >= 1
++
++
++# ---------------------------------------------------------------------------
++# 10. m369_sa_runner role sanity (catches migration 0008 regression)
++# ---------------------------------------------------------------------------
++
++
++def test_sa_runner_role_attributes(db_engine):
++    """m369_sa_runner must be LOGIN + BYPASSRLS + NOSUPERUSER."""
++    import psycopg
++
++    conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
++    try:
++        with conn.cursor() as cur:
++            cur.execute(
++                "SELECT rolcanlogin, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb "
++                "FROM pg_roles WHERE rolname = 'm369_sa_runner'"
++            )
++            row = cur.fetchone()
++            assert row is not None, "m369_sa_runner role missing — migration 0008 not applied"
++            canlogin, super_, bypass, createrole, createdb = row
++            assert canlogin, "m369_sa_runner must be LOGIN"
++            assert not super_, "m369_sa_runner must be NOSUPERUSER"
++            assert bypass, "m369_sa_runner must have BYPASSRLS"
++            assert not createrole, "m369_sa_runner must be NOCREATEROLE"
++            assert not createdb, "m369_sa_runner must be NOCREATEDB"
++    finally:
++        conn.close()
++
++
++def test_sa_runner_has_crud_on_all_tables(db_engine):
++    """m369_sa_runner must have SELECT/INSERT/UPDATE/DELETE on every table."""
++    import psycopg
++
++    conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
++    try:
++        with conn.cursor() as cur:
++            cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
++            all_tables = [r[0] for r in cur.fetchall()]
++            for t in all_tables:
++                for priv in ("SELECT", "INSERT", "UPDATE", "DELETE"):
++                    cur.execute(
++                        "SELECT has_table_privilege('m369_sa_runner', %s, %s)",
++                        (t, priv),
++                    )
++                    assert cur.fetchone()[0], f"m369_sa_runner missing {priv} on {t}"
++    finally:
++        conn.close()
+diff --git a/apps/api/tests/unit/test_config.py b/apps/api/tests/unit/test_config.py
+index e3034fc..81422b3 100644
+--- a/apps/api/tests/unit/test_config.py
++++ b/apps/api/tests/unit/test_config.py
+@@ -160,6 +160,7 @@ def test_production_guard_passes_with_real_secrets():
+     real_super_admin_secret = "another-real-production-super-admin-secret-that-is-also-not-dev-default-64chars!!"
+     real_encryption_key = "a-real-production-encryption-key-that-is-32-bytes-base64-url-safe-aabbccddeeff0011223344"
+     real_db_url = "postgresql+psycopg://m369_app:a-real-production-password@db:5432/m369_support"
++    real_sa_db_url = "postgresql+psycopg://m369_sa_runner:a-real-production-sa-password@db:5432/m369_support"
+ 
+     from app.core.config import get_settings
+     get_settings.cache_clear()
+@@ -170,6 +171,7 @@ def test_production_guard_passes_with_real_secrets():
+         "JWT_SUPER_ADMIN_SECRET_KEY": real_super_admin_secret,
+         "ENCRYPTION_KEY": real_encryption_key,
+         "DATABASE_URL": real_db_url,
++        "DATABASE_URL_SUPER_ADMIN": real_sa_db_url,
+         "COOKIE_SECURE": "true",
+     }, clear=False):
+         from app.core.config import Settings
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 242099a..f2ffc37 100755
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -19,6 +19,7 @@ services:
+       POSTGRES_DB: m369_support
+       POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+       M369_APP_PASSWORD: ${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set}
++      M369_SA_RUNNER_PASSWORD: ${M369_SA_RUNNER_PASSWORD:?M369_SA_RUNNER_PASSWORD must be set}
+     ports:
+       - "127.0.0.1:5432:5432"
+     volumes:
+@@ -60,6 +61,9 @@ services:
+     container_name: m369_api
+     environment:
+       DATABASE_URL: postgresql+psycopg://m369_app:${M369_APP_PASSWORD:?M369_APP_PASSWORD must be set}@db:5432/m369_support
++      # Super Admin operations need BYPASSRLS — separate password, never
++      # shared with the migration service.
++      DATABASE_URL_SUPER_ADMIN: postgresql+psycopg://m369_sa_runner:${M369_SA_RUNNER_PASSWORD:?M369_SA_RUNNER_PASSWORD must be set}@db:5432/m369_support
+       REDIS_URL: redis://redis:6379/0
+ 
+       ENVIRONMENT: ${ENVIRONMENT:-development}
+diff --git a/infrastructure/database/01-bootstrap-roles.sql b/infrastructure/database/01-bootstrap-roles.sql
+index d944fb6..0b36aee 100644
+--- a/infrastructure/database/01-bootstrap-roles.sql
++++ b/infrastructure/database/01-bootstrap-roles.sql
+@@ -37,3 +37,28 @@ GRANT ALL ON SCHEMA public TO m369_app;
+ -- Create test database
+ SELECT 'CREATE DATABASE m369_support_test OWNER postgres'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'm369_support_test')\gexec
++
++-- ---------------------------------------------------------------------------
++-- m369_sa_runner: Super Admin operations role (LOGIN, BYPASSRLS, NOSUPERUSER)
++-- ---------------------------------------------------------------------------
++-- Used by the Super Admin API endpoints via the super_admin_engine.
++-- Distinct password from m369_app — NEVER shared with the migration service
++-- or the ordinary API runtime.
++\getenv m369_sa_runner_password M369_SA_RUNNER_PASSWORD
++
++SELECT format(
++    'CREATE ROLE m369_sa_runner LOGIN PASSWORD %L NOSUPERUSER BYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION',
++    :'m369_sa_runner_password'
++)
++WHERE NOT EXISTS (
++    SELECT 1 FROM pg_roles WHERE rolname = 'm369_sa_runner'
++)
++\gexec
++
++SELECT format(
++    'ALTER ROLE m369_sa_runner WITH LOGIN PASSWORD %L NOSUPERUSER BYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION',
++    :'m369_sa_runner_password'
++)
++\gexec
++
++GRANT ALL ON SCHEMA public TO m369_sa_runner;
+-- 
+2.47.3
+

@@ -434,10 +434,6 @@ def mfa_enable(
         raise HTTPException(status_code=401, detail="Super Admin not found")
     if admin.mfa_enabled:
         raise HTTPException(status_code=409, detail="MFA is already enabled")
-    # Require fresh knowledge-factor proof as well as the existing session.
-    # A stolen access token alone must not enroll an attacker-controlled TOTP device.
-    if not verify_password(payload.password, admin.password_hash):
-        raise HTTPException(status_code=401, detail="Password confirmation failed")
     # A stolen authenticated session must not be able to brute-force the
     # six-digit enrollment proof. Share the dedicated MFA IP/account quota.
     check_verify_mfa_rate_limit(request, sa_id)
