@@ -61,8 +61,8 @@ def test_every_tenant_table_has_one_forced_signed_policy(db_engine):
             for table in TENANT_TABLES:
                 cur.execute(
                     "SELECT c.relrowsecurity, c.relforcerowsecurity, count(p.oid), "
-                    "bool_and(pg_get_expr(p.polqual,p.polrelid) LIKE '%m369_current_tenant_id%'), "
-                    "bool_and(pg_get_expr(p.polwithcheck,p.polrelid) LIKE '%m369_current_tenant_id%'), "
+                    "bool_and(pg_get_expr(p.polqual,p.polrelid) LIKE '%%m369_current_tenant_id%%'), "
+                    "bool_and(pg_get_expr(p.polwithcheck,p.polrelid) LIKE '%%m369_current_tenant_id%%'), "
                     "bool_and(p.polcmd='*') "
                     "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
                     "LEFT JOIN pg_policy p ON p.polrelid=c.oid "
