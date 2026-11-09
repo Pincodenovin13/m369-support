@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     )
 
     # --- Database RLS tenant-context signing ---
-    tenant_context_secret: str = Field(default="dev-only-m369-tenant-context-secret-change-before-production-0001")
+    tenant_context_secret: str = Field(default="dev-only-m369-tenant-context-secret-change-before-production-0001", validation_alias="M369_TENANT_CONTEXT_SECRET")
 
     # --- JWT ---
     jwt_secret_key: str = Field(

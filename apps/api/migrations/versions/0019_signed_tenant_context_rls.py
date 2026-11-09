@@ -42,6 +42,7 @@ def upgrade() -> None:
     """)
     op.execute("CREATE SCHEMA m369_private AUTHORIZATION postgres")
     op.execute("REVOKE ALL ON SCHEMA m369_private FROM PUBLIC, m369_app")
+    op.execute("GRANT USAGE ON SCHEMA public TO m369_tenant_context")
     op.execute("GRANT USAGE ON SCHEMA m369_private TO m369_tenant_context")
     op.execute("""
       CREATE TABLE m369_private.tenant_context_secret (
