@@ -114,7 +114,7 @@ def test_B_01_migration_0011_upgrade_success():
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0019_signed_tenant_context_rls", f"head is {v}, expected signed-RLS head"
+            assert v == "0020_payment_raw_amount_precision", f"head is {v}, expected signed-RLS head"
     finally:
         conn.close()
 
@@ -144,7 +144,7 @@ def test_B_02_unsafe_downgrade_is_refused_and_schema_is_preserved():
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
-            assert cur.fetchone()[0] == "0019_signed_tenant_context_rls"
+            assert cur.fetchone()[0] == "0020_payment_raw_amount_precision"
             cur.execute("SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname='subscriptions'")
             row = cur.fetchone()
             assert row == (True, True), "subscriptions RLS changed after refused downgrade"
