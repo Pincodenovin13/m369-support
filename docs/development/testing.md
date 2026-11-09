@@ -75,4 +75,4 @@ npm run build
 
 - Fix the Starlette/AnyIO deprecation through a compatible dependency update and rerun the complete suite.
 - Update GitHub Actions to supported Node.js 24-compatible action versions after compatibility verification.
-- Inspect the lockfile refresh workflow separately: it currently performs automatic lockfile regeneration and `npm audit fix` before pushing to the active branch.
+- Automatic lockfile mutation workflow was removed in commit `6043cfffe0ee4642fc55c4811f6ae87c481ca9ec`; dependency updates must be explicit and reviewed. CI uses `npm ci` against the committed lockfile.
