@@ -2,7 +2,7 @@
 
 > Last reconciled: 2026-11-09 (UTC)
 > Active development branch: `refactor/repository-structure-unification`
-> Active HEAD: `d17a2930335dba939c2f7eaf2973fd33dbd06f8b` (latest repository/docs reconciliation; application code unchanged from tested snapshot)
+> Active HEAD: resolve from live GitHub branch ref; last audited repository snapshot: `d17a2930335dba939c2f7eaf2973fd33dbd06f8b` (this state reconciliation changes documentation only)
 > GitHub default branch: `test/marker` (still a one-file marker branch; NOT the development source of truth)
 > Tracked files on current active HEAD: 202
 > Alembic head: `0020_payment_raw_amount_precision` (20 linear migrations)
@@ -60,7 +60,7 @@ Repeated basenames such as `README.md`, `page.tsx`, `auth.py`, `agencies.py`, an
 
 ## 4. Latest CI evidence
 
-A fresh API/PostgreSQL workflow was triggered by the API README reconciliation commit `cf66a4fabbc58a27424950b0f792e3f4cbc9e686`; run [42654977524](https://github.com/Pincodenovin13/m369-support/actions/runs/42654977524) was still in progress at the time of this state update. Do not treat it as passed until GitHub reports completion.
+A fresh API/PostgreSQL workflow ran on API README reconciliation commit `cf66a4fabbc58a27424950b0f792e3f4cbc9e686`: [run 42654977524](https://github.com/Pincodenovin13/m369-support/actions/runs/42654977524) completed successfully, **359 passed, 1 warning in 93.61s**. Application source/tests were unchanged from the previously audited tested snapshot.
 
 ### API / PostgreSQL
 
@@ -70,14 +70,14 @@ A fresh API/PostgreSQL workflow was triggered by the API README reconciliation c
 - Command: `pytest -q tests`
 - Result: **359 passed, 1 warning**, 92.52 seconds
 - PostgreSQL service: 16
-- Warning: Starlette TestClient uses deprecated `anyio.abc.BlockingPortal`; GitHub runner also reports Node.js 20 action-runtime deprecation for checkout/setup-python.
+- Warning: Starlette TestClient uses deprecated `anyio.abc.BlockingPortal`; GitHub runner also reports Node.js action-runtime deprecation and Python environment `punycode` deprecation.
 - No skipped count is asserted here because the captured pytest summary reports only passed count and warnings.
 
 ### Frontend
 
-- Workflow: [Web frontend CI](https://github.com/Pincodenovin13/m369-support/actions/runs/42628470610)
+- Workflow: [Web frontend CI](https://github.com/Pincodenovin13/m369-support/actions/runs/42654983328)
 - Result: success for `npm ci`, `npm audit --audit-level=low`, TypeScript, ESLint and production build.
-- This run is on the dashboard frontend commit. The subsequent commits through current HEAD changed backend tests/documentation, not frontend source; frontend CI was not re-triggered by docs-only changes.
+- Latest frontend docs reconciliation triggered CI on `376b3b25beba303b0fef9cd5a2b77e386c194258`; all frontend checks completed successfully.
 
 CI success is tied to the tested commit and workflow scope. It does not certify production deployment or all user workflows.
 
