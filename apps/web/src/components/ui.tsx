@@ -1,44 +1,56 @@
-// Shared UI components for loading, empty, and error states.
+import { AlertCircle, FolderOpen, RefreshCw } from "lucide-react";
 
 export function Loading({ label = "Loading..." }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center py-12">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500" />
-      <span className="ml-3 text-gray-600 text-sm">{label}</span>
+    <div className="flex min-h-48 items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-12 shadow-sm">
+      <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-brand-500" aria-hidden="true" />
+      <span className="text-sm font-medium text-slate-500">{label}</span>
     </div>
   );
 }
 
-export function EmptyState({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
+export function EmptyState({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}) {
   return (
-    <div className="text-center py-12">
-      <div className="text-gray-400 mb-2">
-        <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-        </svg>
+    <div className="flex min-h-64 flex-col items-center justify-center px-5 py-12 text-center">
+      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-400">
+        <FolderOpen size={25} strokeWidth={1.7} />
       </div>
-      <h3 className="text-sm font-medium text-gray-900">{title}</h3>
-      {description && <p className="mt-1 text-sm text-gray-500">{description}</p>}
-      {action && <div className="mt-4">{action}</div>}
+      <h3 className="text-sm font-bold text-slate-800">{title}</h3>
+      {description && <p className="mt-1.5 max-w-md text-sm leading-6 text-slate-500">{description}</p>}
+      {action && <div className="mt-5">{action}</div>}
     </div>
   );
 }
 
-export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ErrorState({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry?: () => void;
+}) {
   return (
-    <div className="text-center py-12">
-      <div className="text-red-400 mb-2">
-        <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" />
-        </svg>
+    <div role="alert" className="flex min-h-56 flex-col items-center justify-center px-5 py-12 text-center">
+      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-red-100 bg-red-50 text-red-500">
+        <AlertCircle size={25} strokeWidth={1.8} />
       </div>
-      <h3 className="text-sm font-medium text-red-900">Something went wrong</h3>
-      <p className="mt-1 text-sm text-gray-500">{message}</p>
+      <h3 className="text-sm font-bold text-slate-800">We couldn’t load this information</h3>
+      <p className="mt-1.5 max-w-md text-sm leading-6 text-slate-500">{message}</p>
       {onRetry && (
         <button
+          type="button"
           onClick={onRetry}
-          className="mt-4 inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+          className="mt-5 inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
         >
+          <RefreshCw size={14} />
           Try again
         </button>
       )}
@@ -46,28 +58,39 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
   );
 }
 
-export function PageHeader({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
+export function PageHeader({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}) {
   return (
-    <div className="mb-6 flex items-start justify-between">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
-        {description && <p className="mt-1 text-sm text-gray-500">{description}</p>}
+    <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0">
+        <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Agency workspace</div>
+        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-[28px]">{title}</h1>
+        {description && <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-500">{description}</p>}
       </div>
-      {action && <div>{action}</div>}
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }
 
+const BADGE_STYLES: Record<string, string> = {
+  open: "border-emerald-100 bg-emerald-50 text-emerald-700",
+  pending: "border-amber-100 bg-amber-50 text-amber-700",
+  resolved: "border-blue-100 bg-blue-50 text-blue-700",
+  closed: "border-slate-200 bg-slate-100 text-slate-600",
+};
+
 export function Badge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    open: "bg-green-100 text-green-800",
-    pending: "bg-yellow-100 text-yellow-800",
-    resolved: "bg-blue-100 text-blue-800",
-    closed: "bg-gray-100 text-gray-800",
-  };
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colors[status] || "bg-gray-100 text-gray-800"}`}>
-      {status}
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold capitalize tracking-wide ${BADGE_STYLES[status] ?? "border-slate-200 bg-slate-100 text-slate-600"}`}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
+      {status.replaceAll("_", " ")}
     </span>
   );
 }
