@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Building2,
+  ClipboardList,
   CreditCard,
   LayoutDashboard,
   LogOut,
@@ -24,6 +25,7 @@ const NAV = [
   { href: "/super-admin/subscriptions", label: "Subscriptions", icon: CreditCard },
   { href: "/super-admin/payments", label: "Payments", icon: ShieldCheck },
   { href: "/super-admin/security", label: "Security", icon: ShieldCheck },
+  { href: "/super-admin/audit-logs", label: "Audit log", icon: ClipboardList },
 ];
 
 function initials(name: string) {
