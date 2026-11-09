@@ -31,14 +31,21 @@ Build the Agency Portal and Super Admin Console in parallel with backend hardeni
 4. Use mobile-first responsive layouts; test narrow mobile, tablet, laptop, and desktop breakpoints.
 5. Add component/unit tests and browser-level critical-path tests before declaring a UI slice complete.
 
-## Known integration risks to resolve before feature expansion
+## Integration defects found and corrected in the first frontend slice
 
-- `apps/web/src/app/contacts/page.tsx` sends query parameter `q`; verify backend expects `search` or `q`, then standardize both sides with a contract test.
-- `apps/web/src/app/teams/page.tsx` derives the workspace for team creation from `teams[0]`. This fails when the agency has zero teams. Use an explicit selected/current workspace from the workspace API instead.
-- The same teams page catches member-list failures and displays an empty member list. Show a visible partial-load error instead of masking authorization or network failures.
-- Knowledge Base rendering currently displays Markdown as plain text. Do not inject untrusted HTML. Adopt a safe Markdown renderer with raw HTML disabled and URL sanitization, or return trusted sanitized HTML from the backend under a documented policy.
-- `apps/web/src/lib/api-client.ts` defines frontend types manually. Add automated schema drift checking from the backend OpenAPI document before relying on these types for new features.
-- Review all API routes and client methods together. The presence of a TypeScript method does not prove that its URL, payload, return shape, or permission behavior matches the backend.
+The first backend/frontend contract review found real mismatches. These were corrected in the shared API client and the affected pages:
+
+- Contacts now sends `search`, matching the FastAPI query parameter (instead of `q`).
+- Teams now loads the agency's workspaces and requires an explicit selected workspace for creation. It no longer derives a workspace from `teams[0]`, so the zero-team case is supported. Member-fetch failures are shown instead of silently presented as zero members.
+- Messages now lists through `GET /messages?conversation_id=...` and sends `content` / `is_internal`; the page reads `content`, `sender_user_id`, and `is_internal` according to the backend response schema.
+- Canned Responses now uses backend fields `shortcut`, `content`, and `created_at` rather than nonexistent `title`, `body`, and `updated_at`.
+- Knowledge Base now uses the backend article response fields and displays `created_at`; it does not expect nonexistent `content_html` or `updated_at`.
+
+Remaining integration work:
+
+- Generate frontend API types from the backend OpenAPI schema and add a CI drift check. Manual TypeScript interfaces can drift again if not checked automatically.
+- Knowledge Base currently displays Markdown as plain text. Keep this safe behavior until a renderer is added with raw HTML disabled and URL sanitization; never inject untrusted HTML.
+- The agency portal still needs create/edit flows and permission-aware UI for several resource types. The current slice is not a feature-complete product.
 
 ## Quality gates
 
