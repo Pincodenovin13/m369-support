@@ -57,7 +57,13 @@ export default function SuperAdminLoginPage() {
       router.replace("/super-admin");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Verification failed");
+      const message = err instanceof Error ? err.message : "Verification failed";
+      // The backend consumes an MFA challenge before validating the second
+      // factor. After a failed verification, require a fresh password login.
+      setChallenge(null);
+      setCode("");
+      setRecoveryMode(false);
+      setError(`${message}. Sign in again to request a fresh MFA challenge.`);
     } finally {
       setLoading(false);
     }
@@ -178,6 +184,7 @@ export default function SuperAdminLoginPage() {
               onClick={() => {
                 setChallenge(null);
                 setCode("");
+                setRecoveryMode(false);
                 setError(null);
               }}
               className="w-full py-1 text-[11px] font-semibold text-slate-400 hover:text-slate-600"
