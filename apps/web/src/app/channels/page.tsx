@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { Loading, ErrorState, EmptyState, PageHeader } from "@/components/ui";
-import { channelApi, ApiError, type ChannelOut, type PaginatedResponse } from "@/lib/api-client";
+import { channelApi, type ChannelOut, type PaginatedResponse } from "@/lib/api-client";
 
 const CHANNEL_TYPES: ChannelOut["type"][] = ["widget", "email", "whatsapp_cloud", "telegram", "instagram", "messenger"];
 
