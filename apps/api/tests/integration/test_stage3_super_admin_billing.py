@@ -480,7 +480,7 @@ def test_sa_payment_raw_token_amount_preserves_uint256_precision(
     sub = _make_subscription(setup_session, a, plan, status="active")
     pay = _make_payment(setup_session, sub, a, txid="tx-raw-precision")
 
-    raw_amount = 12345678901234567890123456789012345678901234567890
+    raw_amount = (1 << 256) - 1  # maximum uint256 value: 78 decimal digits
     raw_column = Payment.__table__.c.paid_amount_raw.type
     assert isinstance(raw_column, Numeric)
     assert raw_column.precision == 78
