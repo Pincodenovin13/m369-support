@@ -8,7 +8,7 @@ import { superAdminApi, type PaymentOut } from "@/lib/super-admin-api-client";
 const PAYMENT_STATUSES = ["pending", "verifying", "verified", "rejected", "expired"];
 
 function decimalToInteger(value: string, scale: number): bigint {
-  const match = /^(\\d+)(?:\\.(\\d*))?$/.exec(value.trim());
+  const match = /^(\d+)(?:\.(\d*))?$/.exec(value.trim());
   if (!match) throw new Error("Enter a valid non-negative decimal amount.");
   const whole = match[1];
   const fraction = match[2] ?? "";
