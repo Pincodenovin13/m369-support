@@ -2,9 +2,9 @@
 
 > Last reconciled: 2026-11-09 (UTC)
 > Active development branch: `refactor/repository-structure-unification`
-> Active HEAD: resolve from live GitHub branch ref; last audited repository snapshot: `d17a2930335dba939c2f7eaf2973fd33dbd06f8b` (this state reconciliation changes documentation only)
+> Active HEAD: resolve from live GitHub branch ref; last audited repository snapshot: `dc389d75d6a19265a6a0cb639b1ae8247abe5cd8` (this state reconciliation changes documentation only)
 > GitHub default branch: `test/marker` (still a one-file marker branch; NOT the development source of truth)
-> Tracked files on current active HEAD: 202
+> Tracked files on current active HEAD: 203
 > Alembic head: `0020_payment_raw_amount_precision` (20 linear migrations)
 > Production deployment database: NOT inspected
 > Production deployment configuration: NOT ready; current docker-compose.yml is local-development only
