@@ -32,7 +32,8 @@ SELECT format(
 \gexec
 
 -- Grant schema usage (tables are created by the migration as postgres)
-GRANT ALL ON SCHEMA public TO m369_app;
+GRANT USAGE ON SCHEMA public TO m369_app;
+REVOKE CREATE ON SCHEMA public FROM m369_app;
 
 -- Create test database
 SELECT 'CREATE DATABASE m369_support_test OWNER postgres'
@@ -61,7 +62,8 @@ SELECT format(
 )
 \gexec
 
-GRANT ALL ON SCHEMA public TO m369_sa_runner;
+GRANT USAGE ON SCHEMA public TO m369_sa_runner;
+REVOKE CREATE ON SCHEMA public FROM m369_sa_runner;
 
 -- ---------------------------------------------------------------------------
 -- m369_sa_auth: Dedicated Super Admin authentication-only role
