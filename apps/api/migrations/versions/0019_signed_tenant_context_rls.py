@@ -21,18 +21,11 @@ def upgrade() -> None:
     if len(secret.encode("utf-8")) < 32:
         raise RuntimeError("M369_TENANT_CONTEXT_SECRET must be at least 32 UTF-8 bytes")
     op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public")
-    op.execute("""
-      DO $
-      DECLARE ext_schema text;
-      BEGIN
-        SELECT n.nspname INTO ext_schema
-        FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace
-        WHERE e.extname='pgcrypto';
-        IF ext_schema IS DISTINCT FROM 'public' THEN
-          ALTER EXTENSION pgcrypto SET SCHEMA public;
-        END IF;
-      END $
-    """)
+    extension_schema = op.get_bind().execute(sa.text(
+        "SELECT n.nspname FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='pgcrypto'"
+    )).scalar_one()
+    if extension_schema != "public":
+        op.execute("ALTER EXTENSION pgcrypto SET SCHEMA public")
     op.execute("""
       DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='m369_tenant_context') THEN
