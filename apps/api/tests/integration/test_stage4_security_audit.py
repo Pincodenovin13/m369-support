@@ -329,7 +329,7 @@ def test_payment_usdt_6_decimals_correctly_recorded(client: TestClient, setup_se
     })
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["paid_amount_raw"] == 1_000_000
+    assert body["paid_amount_raw"] == "1000000"
     assert body["paid_amount_decimals"] == 6
 
 
