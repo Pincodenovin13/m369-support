@@ -2,7 +2,7 @@
 
 > Last reconciled: 2026-11-09 (UTC)
 > Active development branch: `refactor/repository-structure-unification`
-> Active HEAD: `a510795d9b77ab31f820496d37d0ab2e009b13d1` (docs/workflow-only commits after tested application snapshot)
+> Active HEAD: `d17a2930335dba939c2f7eaf2973fd33dbd06f8b` (latest repository/docs reconciliation; application code unchanged from tested snapshot)
 > GitHub default branch: `test/marker` (still a one-file marker branch; NOT the development source of truth)
 > Tracked files on current active HEAD: 202
 > Alembic head: `0020_payment_raw_amount_precision` (20 linear migrations)
@@ -59,6 +59,8 @@ The repository currently exposes 12 branches (verify live branch list before bra
 Repeated basenames such as `README.md`, `page.tsx`, `auth.py`, `agencies.py`, and `__init__.py` occur in separate, intentional module paths. They are not evidence of duplicate files by themselves. Do not flatten or rename them without checking Python/Next.js routing and imports.
 
 ## 4. Latest CI evidence
+
+A fresh API/PostgreSQL workflow was triggered by the API README reconciliation commit `cf66a4fabbc58a27424950b0f792e3f4cbc9e686`; run [42654977524](https://github.com/Pincodenovin13/m369-support/actions/runs/42654977524) was still in progress at the time of this state update. Do not treat it as passed until GitHub reports completion.
 
 ### API / PostgreSQL
 
