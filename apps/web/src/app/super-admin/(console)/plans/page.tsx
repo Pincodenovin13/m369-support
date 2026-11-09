@@ -18,6 +18,11 @@ export default function SuperAdminPlansPage() {
     price: "19.00",
     trial_days: "7",
     currency: "USD",
+    max_seats: "3",
+    max_conversations: "500",
+    max_workspaces: "1",
+    channels: ["widget"] as string[],
+    whitelabel: false,
   });
 
   const loadPlans = useCallback(async () => {
@@ -42,8 +47,18 @@ export default function SuperAdminPlansPage() {
     if (saving) return;
     const price = Number(form.price);
     const trialDays = Number(form.trial_days);
-    if (!Number.isFinite(price) || price < 0 || !Number.isInteger(trialDays) || trialDays < 0) {
-      setError("Enter a valid non-negative price and whole-number trial period.");
+    const maxSeats = Number(form.max_seats);
+    const maxConversations = Number(form.max_conversations);
+    const maxWorkspaces = Number(form.max_workspaces);
+    if (
+      !Number.isFinite(price) || price < 0 ||
+      !Number.isInteger(trialDays) || trialDays < 0 ||
+      !Number.isInteger(maxSeats) || maxSeats < 1 ||
+      !Number.isInteger(maxConversations) || maxConversations < 1 ||
+      !Number.isInteger(maxWorkspaces) || maxWorkspaces < 1 ||
+      form.channels.length === 0
+    ) {
+      setError("Enter valid pricing, trial, usage limits, and select at least one channel.");
       return;
     }
     setSaving(true);
@@ -56,12 +71,30 @@ export default function SuperAdminPlansPage() {
         currency: form.currency,
         is_active: true,
         sort_order: plans.length,
-        features: {},
-        limits: {},
+        features: {
+          channels: form.channels,
+          ...(form.whitelabel ? { whitelabel: true } : {}),
+        },
+        limits: {
+          max_seats: maxSeats,
+          max_conversations: maxConversations,
+          max_workspaces: maxWorkspaces,
+        },
         trial_days: trialDays,
       });
       setShowCreate(false);
-      setForm({ name: "", display_name: "", price: "19.00", trial_days: "7", currency: "USD" });
+      setForm({
+        name: "",
+        display_name: "",
+        price: "19.00",
+        trial_days: "7",
+        currency: "USD",
+        max_seats: "3",
+        max_conversations: "500",
+        max_workspaces: "1",
+        channels: ["widget"],
+        whitelabel: false,
+      });
       await loadPlans();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to create plan");
@@ -133,6 +166,45 @@ export default function SuperAdminPlansPage() {
               <input required type="number" min="0" max="365" step="1" value={form.trial_days} onChange={(e) => setForm({ ...form, trial_days: e.target.value })} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-brand-400 focus:ring-4 focus:ring-orange-500/10" />
             </label>
           </div>
+          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <label className="block">
+              <span className="text-[11px] font-bold text-slate-600">Maximum seats</span>
+              <input required type="number" min="1" step="1" value={form.max_seats} onChange={(e) => setForm({ ...form, max_seats: e.target.value })} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-brand-400" />
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-bold text-slate-600">Monthly conversations</span>
+              <input required type="number" min="1" step="1" value={form.max_conversations} onChange={(e) => setForm({ ...form, max_conversations: e.target.value })} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-brand-400" />
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-bold text-slate-600">Maximum workspaces</span>
+              <input required type="number" min="1" step="1" value={form.max_workspaces} onChange={(e) => setForm({ ...form, max_workspaces: e.target.value })} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-brand-400" />
+            </label>
+          </div>
+          <div className="mt-5">
+            <div className="mb-2 text-[11px] font-bold text-slate-600">Included channels</div>
+            <div className="flex flex-wrap gap-3">
+              {["widget", "whatsapp_cloud", "email", "telegram", "instagram", "messenger"].map((channel) => (
+                <label key={channel} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-[10px] font-semibold text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={form.channels.includes(channel)}
+                    onChange={(event) => setForm({
+                      ...form,
+                      channels: event.target.checked
+                        ? [...form.channels, channel]
+                        : form.channels.filter((value) => value !== channel),
+                    })}
+                    className="accent-orange-500"
+                  />
+                  {channel.replaceAll("_", " ")}
+                </label>
+              ))}
+              <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-[10px] font-semibold text-slate-600">
+                <input type="checkbox" checked={form.whitelabel} onChange={(event) => setForm({ ...form, whitelabel: event.target.checked })} className="accent-orange-500" />
+                White label
+              </label>
+            </div>
+          </div>
           <div className="mt-5 flex justify-end">
             <button type="submit" disabled={saving} className="min-h-10 rounded-xl bg-slate-900 px-5 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-50">
               {saving ? "Creating…" : "Create plan"}
@@ -168,6 +240,16 @@ export default function SuperAdminPlansPage() {
                     <span className="ml-1">/ month</span>
                     <span className="mx-2 text-slate-300">·</span>
                     {plan.trial_days} trial days
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-slate-500">
+                    <span>{String(plan.limits.max_seats ?? "—")} seats</span>
+                    <span>·</span>
+                    <span>{String(plan.limits.max_conversations ?? "—")} conversations</span>
+                    <span>·</span>
+                    <span>{String(plan.limits.max_workspaces ?? "—")} workspaces</span>
+                    <span>·</span>
+                    <span>{Array.isArray(plan.features.channels) ? plan.features.channels.map(String).join(", ") : "No channels"}</span>
+                    {plan.features.whitelabel === true && <span className="font-bold text-brand-700">· White label</span>}
                   </div>
                 </div>
                 <button
