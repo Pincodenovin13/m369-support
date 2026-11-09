@@ -275,7 +275,6 @@ export const superAdminApi = {
       return request(`/payments/${paymentId}/reject`, { method: "POST", body: JSON.stringify({ failure_reason }) });
     },
   },
-,
   auditLogs: {
     list(params?: { action?: string; super_admin_id?: string; since?: string; until?: string; limit?: number; offset?: number }): Promise<PaginatedResponse<SuperAdminAuditLogOut>> {
       return request(`/audit-logs${query(params)}`);
