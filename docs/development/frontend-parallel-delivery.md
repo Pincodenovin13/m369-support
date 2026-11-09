@@ -6,11 +6,12 @@ Build the Agency Portal and Super Admin Console in parallel with backend hardeni
 
 ## Current repository baseline (2026-11-09)
 
-- Frontend: `apps/web/`, Next.js 15.1.7, React 19, TypeScript 5.7, Tailwind CSS 3.4.17, TanStack Query 5.65.1.
+- Frontend: `apps/web/`, Next.js 15.5.29 (security-maintenance line), React 19.0.1, TypeScript 5.7, Tailwind CSS 3.4.17, TanStack Query 5.65.1.
 - Backend: `apps/api/`, FastAPI, PostgreSQL, Alembic, signed tenant context and RLS migration 0019.
 - Existing UI routes: `/`, `/login`, `/register`, `/dashboard`, `/contacts`, `/conversations`, `/conversations/[id]`, `/teams`, `/channels`, `/canned-responses`, `/kb`.
 - Existing backend routers also expose Super Admin auth, agencies, plans, subscriptions, payments, settings, notes, and audit endpoints. A complete Super Admin UI is not yet present.
-- Frontend checks were previously not enforced by CI. `.github/workflows/web-ci.yml` now runs `npm ci`, TypeScript type-check, ESLint, and a production Next.js build on frontend changes.
+- `.github/workflows/web-ci.yml` now runs lockfile reconciliation, `npm ci`, dependency audit, TypeScript type-check, ESLint, and a production Next.js build on frontend changes.
+- `.github/workflows/refresh-web-lockfile.yml` regenerates and commits the dependency lockfile after pinned manifest changes; it uses a branch-restricted workflow token and does not run for pull requests.
 
 ## Parallel workstreams
 
