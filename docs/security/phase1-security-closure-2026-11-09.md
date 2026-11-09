@@ -4,18 +4,18 @@
 
 **Repository security CI: PASS. Production security certification: NOT CLAIMED.**
 
-The complete API suite passed on commit `fb57c3e24d071ecb807bc64a8be330400818b4c7`.
+The complete API suite passed on commit `edb7b2d2e3102d001e14e4650cb0cdfa0722c118`.
 
 ## CI evidence
 
 - Repository: `Pincodenovin13/m369-support`
 - Branch: `refactor/repository-structure-unification`
 - Commit: `fb57c3e24d071ecb807bc64a8be330400818b4c7`
-- Workflow: [API PostgreSQL security tests](https://github.com/Pincodenovin13/m369-support/actions/runs/42605960342)
+- Workflow: [API PostgreSQL security tests](https://github.com/Pincodenovin13/m369-support/actions/runs/42616889443)
 - Job: `postgres-tests` — completed successfully
 - Command: `pytest -q tests`
 - Result: **357 passed, 0 failed, 0 skipped, 1 warning**
-- Runtime: 77.10 seconds; Python 3.12; PostgreSQL 16.15
+- Runtime: 81.58 seconds; Python 3.12; PostgreSQL 16.15
 - Warning: Starlette TestClient uses the deprecated `anyio.abc.BlockingPortal` alias.
 
 ## Controls verified
