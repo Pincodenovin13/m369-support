@@ -20,8 +20,8 @@ M369 Support is a multi-tenant SaaS customer support platform built as a modular
 │  │  API Layer (routers) /api/v1                              │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Tenant Context (per-request, transaction-scoped)         │  │
-│  │  SET LOCAL app.tenant_id = '<uuid>' → RLS filters rows    │  │
+│  │  Signed Tenant Context (per-request, transaction-scoped)  │  │
+│  │  SET LOCAL tenant_id + HMAC signature → DB verifier/RLS   │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │  Service Layer (business logic)                          │  │
@@ -72,4 +72,4 @@ JWT decoders are type-strict: a `super_admin` token can never be decoded as an `
 See `docs/security/tenant-isolation.md` for details.
 
 
-**Security boundary:** RLS policies currently trust the transaction-local `app.tenant_id` GUC set by the API. This blocks ordinary missing-filter/query mistakes, but a party able to execute arbitrary SQL as `m369_app` can set that custom GUC. Signed tenant-context verification or a stronger per-tenant database identity boundary remains a production hardening requirement. See [tenant isolation](../security/tenant-isolation.md).
+**Current security boundary:** tenant RLS policies use `public.m369_current_tenant_id()` to verify the transaction-local `app.tenant_id` and `app.tenant_sig` pair with HMAC-SHA256. An arbitrary SQL caller running as `m369_app` cannot forge another tenant context without the signing secret. The secret is stored in the private schema and is not readable by the runtime role. Compromise of the API process or signing secret remains in the threat model. This implementation is covered by PostgreSQL 16 CI; production role/grant/secret provisioning still requires deployment verification. See [tenant isolation](../security/tenant-isolation.md).

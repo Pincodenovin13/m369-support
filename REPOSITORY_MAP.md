@@ -55,7 +55,7 @@ m369-support/
 | `apps/api/app/services/` | Business logic (stateless functions) | `audit.py:write_audit`, `billing.py`, `rate_limit.py`, `sa_auth.py` | Domain logic, atomic DB updates, Redis calls | Route handlers |
 | `apps/api/app/tenancy/` | Tenant context primitives | `context.py:TenantContext`, `set_tenant_context`, `clear_tenant_context`, `TenantOwned` mixin | Tenant GUC management, tenant-owned mixin | Middleware, business logic |
 | `apps/api/app/slugs.py` | Slug utility for unique URL-safe names | `unique_slug()` | Slug generation only | Anything else |
-| `apps/api/migrations/` | Alembic config + migrations | `env.py`, `versions/0001_initial.py` through `0019_signed_tenant_context_rls.py` | Schema migrations and explicitly validated data backfills | Application code |
+| `apps/api/migrations/` | Alembic config + migrations | `env.py`, `versions/0001_initial.py` through `0020_payment_raw_amount_precision.py` | Schema migrations and explicitly validated data backfills | Application code |
 | `apps/api/scripts/` | Operational scripts | `create_super_admin.py`, `provision_sa_auth_role.py` | One-off provisioning + admin scripts | Tests, application code |
 | `apps/api/tests/` | Test suite | `conftest.py`, `unit/`, `integration/` | Tests only | Application code, scripts |
 | `apps/api/Dockerfile` | API container image | — | Build + runtime for API service | Frontend, widget |
@@ -70,8 +70,8 @@ m369-support/
 |---|---|
 | Backend source files (`apps/api/app/**/*.py`) | 58 |
 | Backend test/support Python files (`apps/api/tests/**/*.py`) | 25 |
-| Static test function count | Not re-counted after signed RLS tests; see STATE.md |
-| Migrations | 19 (0001–0019, linear chain) |
+| Static test function count | Not asserted here; see current CI evidence in STATE.md |
+| Migrations | 20 (0001–0020, linear chain; head `0020_payment_raw_amount_precision`) |
 | Database tables | 25 (14 in `models/__init__.py` + 11 in `models/phase1_extended.py`) |
 | API endpoints | 64 (verified via `grep -rhE '@router\.(get\|post\|put\|patch\|delete)'`) |
 | Database roles | 7 (previous six plus `m369_tenant_context` verifier owner) |
@@ -97,9 +97,10 @@ m369-support/
 
 | Metric | Value |
 |---|---|
-| Frontend source files (`apps/web/src/**/*`) | 19 |
+| Frontend source files (`apps/web/src/**/*`) | 31 |
 | Frontend config files | 8 |
-| Frontend test files | 0 (NOT IMPLEMENTED — Phase 1 has no frontend test suite) |
+| Frontend App Router page files | 19 |
+| Frontend test files | 0 (NOT IMPLEMENTED — browser/component tests remain required) |
 | Frontend type-check (`tsc --noEmit`) | ✅ Independently verified PASS (2026-11-08) |
 
 ---
@@ -153,6 +154,10 @@ See [`docs/README.md`](./docs/README.md) for the documentation index.
 ---
 
 ## `.github/` — GitHub Configuration
+
+| `.github/dependabot.yml` | Weekly dependency update PR configuration for npm and GitHub Actions |
+| `.github/workflows/web-ci.yml` | Read-only web validation: `npm ci`, npm audit, TypeScript, ESLint, production build |
+| `.github/workflows/refresh-web-lockfile.yml` | Mutating lockfile refresh workflow; review separately because it runs `npm install` and `npm audit fix` and pushes a commit to the active branch |
 
 | Path | Responsibility |
 |---|---|

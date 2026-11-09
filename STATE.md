@@ -1,173 +1,132 @@
-# M369 Support — Project State
+# M369 Support — Authoritative Project State
 
-> **Last updated:** 2026-11-09 — signed tenant-context RLS hardening verified in PostgreSQL 16 CI
-> **Canonical development branch:** `phase-1/foundation`
-> **Current working branch:** `refactor/repository-structure-unification` (HEAD: `c7feb2d4788ca07827c073ee10755c39e8dbadb6`)
-> **Recovery branch:** `recovery/zai-workspace-2026-11-08` (HEAD: `1c3294154b41e051855613416f0bc68c3901d125`)
-> **Tracked files:** 182
-> **Migration head (filesystem):** `0019_signed_tenant_context_rls` (19 migrations, linear chain)
-> **Migration head (CI PostgreSQL 16):** `0019_signed_tenant_context_rls` — full Alembic upgrade from base succeeded in GitHub Actions; persistent deployment DB not inspected
+> Last reconciled: 2026-11-09 (UTC)
+> Active development branch: `refactor/repository-structure-unification`
+> Active HEAD: `ce3d54a2df13494ee914bea2f0677dd11f736a0c`
+> GitHub default branch: `test/marker` (still a one-file marker branch; NOT the development source of truth)
+> Tracked files on active HEAD: 201
+> Alembic head: `0020_payment_raw_amount_precision` (20 linear migrations)
+> Production deployment database: NOT inspected
 
----
+## 1. Source-of-truth rules
 
-## Project Phase
+1. The active development source is the exact branch and HEAD named above.
+2. This file is the canonical current-state summary. Historical reports under `recovery/` and old branch snapshots are not implementation instructions.
+3. Do not develop on `test/marker`, `phase-1/foundation`, or historical checkpoint branches.
+4. Do not delete branches, rewrite published history, force-push, or reapply archived patches as part of routine work.
+5. Any code/schema change must be checked against the current active HEAD, not against a stale local or historical report.
 
-**Phase 1 (Foundation + Multi-Tenancy + Security Hardening)** — backend implementation complete on `phase-1/security-closure-b1-4` (commit `ab046a2`). The 16 hardening commits are NOT yet merged into `phase-1/foundation` on GitHub (foundation is still at Stage 4, commit `0b3139a`). A `recovery/zai-workspace-2026-11-08` branch preserves the Rule 13 documentation + historical artifacts. The current `refactor/repository-structure-unification` branch adds repository structure unification + frontend feature buildout.
+## 2. Branch topology
 
-Historical package test results below are labeled by their original source. The signed tenant-context/RLS closure is separately verified by a GitHub Actions run against PostgreSQL 16 (73 passed, 4 deselected). This does not mean the entire backend suite or a persistent production deployment has been verified.
+The repository currently exposes 12 branches. Comparison of each of the 11 other branch tips against the active HEAD reports the active branch as ahead and behind by zero; each compared branch tip is an ancestor of the active HEAD. This means the visible branch tips are historical checkpoints on the same ancestry line, not currently divergent code lines.
 
----
-
-## Completed Packages
-
-| Package | Commit SHA | Key Deliverable |
+| Branch | Tip | Classification |
 |---|---|---|
-| Stage 1 | `321ebfc` | 11 new tables (migration 0006), 4 plans seeded |
-| Stage 2 | `853b557` | 27 agency endpoints + RBAC + pagination + audit logs |
-| Stage 3 | `70e026f` | 26 Super Admin endpoints + billing lifecycle + payments |
-| Stage 4 | `0b3139a` | 37 security audit tests, 168 total passing |
-| Package A | `bde9a90` | SA auth hardening: token_version, brute-force, rate limit, TOTP MFA, migration 0010 |
-| Package A.1 | `e51b7aa` | Custom Redis limiter, atomic challenge/recovery consumption, independent MFA lockout |
-| Package A.2 | `88de552` | Precise TOTP replay (constraint name), savepoint, fakeredis, proxy trust boundary |
-| Package A.2.1 | `b32f624` | fakeredis separated from production, XFF hardening with ipaddress validation |
-| Package B | `a5a3a2c` | message_attachments agency_id + 10 composite FKs + RLS on 3 tables + least-privilege m369_sa_runner |
-| Package B.1 | `9afc2f5` | FK ON DELETE corrections + dedicated m369_sa_auth role (column-level UPDATE) + m369_app fully revoked from SA tables |
-| Package B.1.1 | `30b6dfd` | Provisioning script + full CRUD RLS test + effective privilege audit |
-| Package B.1.1.2 | `72dfc67` | Test reliability: try/finally, returncode assertion, SQLSTATE 42501, 4×12 privilege checks |
-| Package B.1.2 | `2b6905c` | Registration RLS fix (advisory lock + guard function + tenant context) + m369_super_admin neutralization + default privilege cleanup |
-| Agency Token Revocation | `890f6a5` | Server-side session revocation for agency users (token_version + tver claim in JWT) |
-| Package B.1.3 | `61efc4c` | Refresh cookie flow + JWT validation hardening + multi-agency login UI + dashboard fixes |
-| Package B.1.3.1 | `bc2d515` | Missing frontend api-client.ts (gitignore fix) + dashboard role lookup + 401/403 separation |
-| Package B.1.4 | `ab046a2` | Role cleanup + refresh-token rotation (atomic tver bump on every refresh) + frontend auth + migration 0016 |
-| Rule 13 | `79b4311` (on recovery branch) | CONTRIBUTING.md with Rules 1-13 (Rule 13 = Artifact Disclosure & Delivery mandate) |
+| `refactor/repository-structure-unification` | `ce3d54a2` | Active development |
+| `test/marker` | `34d97bf4` | Default branch; one file only; stale |
+| `phase-1/foundation` | `0b3139a1` | Historical checkpoint |
+| `phase-1/agency-auth-integration-closure` | `5fc22ad8` | Historical checkpoint |
+| `phase-1/agency-token-revocation` | `890f6a58` | Historical checkpoint |
+| `phase-1/security-closure-b1-4` | `ab046a23` | Historical checkpoint |
+| `phase-1/security-final-hardening` | `2b6905c8` | Historical checkpoint |
+| `phase-1/security-hardening` | `b32f6242` | Historical checkpoint |
+| `phase-1/tenant-isolation-b1-1` | `72dfc674` | Historical checkpoint |
+| `phase-1/tenant-isolation-corrections` | `9afc2f5a` | Historical checkpoint |
+| `phase-1/tenant-isolation-hardening` | `a5a3a2cb` | Historical checkpoint |
+| `recovery/zai-workspace-2026-11-08` | `1c329415` | Historical recovery checkpoint |
 
----
+**Required repository setting cleanup:** change GitHub's default branch from `test/marker` to `refactor/repository-structure-unification` only after the owner confirms this is the intended long-term integration branch and branch protection/required checks are configured. The current GitHub connector can inspect repository metadata but cannot change this setting. No branch was deleted or rewritten.
 
-## Migration Chain
+## 3. Current repository inventory
 
-```
-0001_initial
-  → 0002_remove_admin_login
-  → 0003_login_helper_function
-  → 0004_fix_login_helper_acl
-  → 0005_restrict_login_helper_owner
-  → 0006_phase1_extended
-  → 0007_fix_login_reader_acl
-  → 0008_create_sa_runner_role
-  → 0009_widen_paid_currency
-  → 0010_sa_auth_hardening
-  → 0011_tenant_isolation_hardening
-  → 0012_package_b1_critical_corrections
-  → 0013_package_b1_2_final_security
-  → 0014_agency_user_token_version
-  → 0015_revoke_super_admin_memberships_both_directions
-  → 0016_extend_login_helper_with_agency_name
-  → 0017_revoke_runtime_schema_create
-  → 0018_workspace_agency_fks_contacts_teams
-  → 0019_signed_tenant_context_rls                ← HEAD
-```
-
-**Filesystem head:** `0019_signed_tenant_context_rls` (19 migrations, linear chain)
-**CI database head:** `0019_signed_tenant_context_rls` (PostgreSQL 16, GitHub Actions)
-**Persistent deployment database:** not inspected; apply the migration through the controlled deployment process before serving production traffic.
-
----
-
-## Test Status (strict verification labels)
-
-| Metric | Value | Verification |
-|---|---|---|
-| Backend test files | 25 | Current tracked tree count on this branch |
-| Backend test functions (static count) | Not re-counted after RLS additions | Do not infer a full-suite count from the focused CI run |
-| Focused tenant-isolation/security CI | 73 passed, 4 deselected, 1 warning (12.42s) | ✅ GitHub Actions run `42589912453`, PostgreSQL 16; includes signed-context attacks, 16-table policy audit, RLS CRUD, API RBAC |
-| Frontend type-check (`tsc --noEmit`) | PASS (exit 0) | ✅ INDEPENDENTLY VERIFIED (2026-11-08, after frontend buildout) |
-| Frontend build (`next build`) | PASS | Z.ai-REPORTED ONLY |
-| Frontend lint (`next lint`) | PASS | Z.ai-REPORTED ONLY |
-| Frontend test suite | 0 files | NOT IMPLEMENTED (Phase 1 has no frontend tests) |
-| Frontend feature pages | 10 routes (login, register, dashboard, contacts, conversations, conversations/[id], teams, channels, canned-responses, kb) | ✅ IMPLEMENTED (2026-11-08, commit `9a6e98f`) |
-| CI workflow (`.github/workflows/api-postgres-security.yml`) | PASS | ✅ GitHub Actions run `42589912453` on commit `d901887`; PostgreSQL 16 |
-| Docker Compose deployment | BLOCKED | Docker unavailable in sandbox |
-| Real Redis integration | BLOCKED | fakeredis used for rate-limit tests |
-| Clean venv install | BLOCKED | No isolated venv in sandbox |
-| Reverse proxy deployment | BLOCKED | TRUSTED_PROXY_IPS tested via mocks only |
-| Independent third-party test verification | BLOCKED | No third party has executed the suite |
-
----
-
-## Database Roles
-
-| Role | LOGIN | BYPASSRLS | Purpose |
-|---|---|---|---|
-| `m369_app` | ✅ | ❌ | Ordinary tenant operations (RLS-enforced) |
-| `m369_sa_auth` | ✅ | ❌ | Super Admin login + MFA verify (column-level UPDATE) |
-| `m369_sa_runner` | ✅ | ✅ | Super Admin management (BYPASSRLS, least-privilege) |
-| `m369_login_reader` | ❌ | ✅ | SECURITY DEFINER function owner (login helper) |
-| `m369_registration_guard` | ❌ | ✅ | Registration check function owner |
-| `m369_tenant_context` | ❌ | ❌ | SECURITY DEFINER owner for the HMAC tenant verifier; SELECT only on private key row |
-| `m369_super_admin` | ❌ | ❌ | Neutralized (was BYPASSRLS + broad DML; now inert) |
-
----
-
-## Outstanding Risks (Production Readiness)
-
-| # | Risk | Priority | Status |
-|---|---|---|---|
-| P0-1 | B.1.4 (16 hardening commits) NOT merged into `phase-1/foundation` on GitHub | Critical | foundation on GitHub still at Stage 4 (`0b3139a`) |
-| P0-2 | Full backend suite not yet green in CI | Critical | Focused tenant-isolation suite is green (73 passed); legacy full-suite rate-limit and downgrade tests remain outside this focused run |
-| P0-3 | No security headers (HSTS, X-Content-Type-Options, CSP, etc.) | Critical | `apps/api/app/main.py` registers only CORS + TenantContext middlewares |
-| P0-4 | No request body size limits | Critical | No `max_request_size` enforcement |
-| P0-5 | Tenant GUC spoofing | Critical | CLOSED IN CODE: migration 0019 verifies HMAC-signed tenant context inside PostgreSQL; 73 focused CI tests passed. API process/key compromise remains in threat model |
-| P1-1 | Agency `User` accounts have no DB-side lockout (only Redis rate limit) | Important | Asymmetric with Super Admin |
-| P1-2 | No email verification flow | Important | Zero `email_verif*` references |
-| P1-3 | Password policy is length-only (10/12 chars) | Important | No complexity rules |
-| P1-4 | No structured logging | Important | Zero `import logging`/`structlog` |
-| P1-5 | Real Redis integration never exercised | Important | fakeredis in tests |
-| P1-6 | Production database not independently inspected | Important | PostgreSQL 16 RLS integration suite is exercised in GitHub Actions; persistent deployment DB state remains unverified |
-| P1-7 | Reverse-proxy trusted-IP boundary not deployed | Important | No Caddy/Nginx configured |
-| P2-1 | No embeddable widget | Operational | `apps/widget/src/.gitkeep` placeholder |
-| P2-2 | No Knowledge Base Markdown rendering | Operational | `kb.py` sets `content_html=""` |
-| P2-3 | No frontend test suite | Operational | Zero `.test.*` files |
-| P2-4 | Docker Compose deployment never verified | Operational | Docker not in sandbox |
-| P2-5 | GitHub default branch is `test/marker`, not `phase-1/foundation` | Operational | Requires owner approval to change |
-
----
-
-## Feature Status Key
-
-| Status | Meaning |
+| Area | Current inventory |
 |---|---|
-| ✅ INDEPENDENTLY VERIFIED | Verified by execution in this session (with command + exit code) |
-| 🔶 IMPLEMENTER-REPORTED | Reported by Z.ai but not independently verified |
-| ⏳ PLANNED | Not yet implemented |
-| ❌ BLOCKED | Cannot verify due to environment limitations |
-| 🚫 NOT IMPLEMENTED | Feature does not exist |
+| Root | `.env.example`, README, STATE, REPOSITORY_MAP, CONTRIBUTING, Makefile, Docker Compose, LICENSE |
+| Backend | `apps/api/` — FastAPI application, services, schemas, security, tenancy, scripts and tests |
+| Backend Python application files | 58 |
+| Backend Python test/support files | 25 |
+| Alembic migrations | 20, from `0001_initial` through `0020_payment_raw_amount_precision` |
+| Frontend | `apps/web/` — Next.js 15 / React 19 / TypeScript |
+| Frontend source files | 31 |
+| Frontend App Router page files | 19 |
+| Widget | `apps/widget/` — README + placeholder only; no working widget implementation |
+| Shared package | `packages/shared/` — README + placeholder only; no published shared TypeScript package |
+| Infrastructure | `infrastructure/database/01-bootstrap-roles.sql` |
+| Docs | Architecture, database, development, security and future-capability roadmap |
+| Recovery | Historical archive only; contains superseded material and explicit OpenLivery references in legacy documents |
 
+Repeated basenames such as `README.md`, `page.tsx`, `auth.py`, `agencies.py`, and `__init__.py` occur in separate, intentional module paths. They are not evidence of duplicate files by themselves. Do not flatten or rename them without checking Python/Next.js routing and imports.
 
-## 2026-11-09 Tenant-Isolation Corrections (ChatGPT repository commits)
+## 4. Latest CI evidence
 
-| Commit | Change | Verification |
-|---|---|---|
-| `d9d945c` | Migration 0017 revokes schema CREATE from `m369_app` and PUBLIC; bootstrap grants USAGE only to runtime roles | Committed and fetched back from GitHub; PostgreSQL test not run here |
-| `94381f3` | Migration 0018 adds composite workspace/agency FKs for `contacts` and `teams`, after fail-closed data validation | Committed; included in the later PostgreSQL 16 migration run |
-| `d901887` | Migration 0019 adds HMAC-signed tenant context; all 16 tenant tables use the DB verifier; positive/negative tests + PostgreSQL 16 CI | 73 passed, 4 deselected |
-| `c7feb2d` | STATE, REPOSITORY_MAP, and tenant-isolation security documentation updated with the verified closure | Committed and fetched back from GitHub |
+### API / PostgreSQL
 
-Schema-privilege and cross-agency workspace tests were added. The later focused PostgreSQL 16 CI run executes the relevant tenant-isolation and attachment-RLS coverage.
+- Workflow: [API PostgreSQL security tests](https://github.com/Pincodenovin13/m369-support/actions/runs/42646416006)
+- Exact commit: `ce3d54a2df13494ee914bea2f0677dd11f736a0c`
+- Job: `postgres-tests`
+- Command: `pytest -q tests`
+- Result: **359 passed, 1 warning**, 92.52 seconds
+- PostgreSQL service: 16
+- Warning: Starlette TestClient uses deprecated `anyio.abc.BlockingPortal`; GitHub runner also reports Node.js 20 action-runtime deprecation for checkout/setup-python.
+- No skipped count is asserted here because the captured pytest summary reports only passed count and warnings.
 
-### Tenant GUC trust-boundary finding — CLOSED IN CODE
+### Frontend
 
-The unsigned-GUC spoofing weakness identified during this audit is addressed by migration 0019 and the signed tenant-context verifier described below. Raw `app.tenant_id` is no longer accepted by tenant policies without a matching HMAC signature. The residual threat is compromise of the API process or its secret, not arbitrary GUC changes from SQL execution alone.
+- Workflow: [Web frontend CI](https://github.com/Pincodenovin13/m369-support/actions/runs/42628470610)
+- Result: success for `npm ci`, `npm audit --audit-level=low`, TypeScript, ESLint and production build.
+- This run is on the dashboard frontend commit. The subsequent commits through current HEAD changed backend tests/documentation, not frontend source; frontend CI was not re-triggered by docs-only changes.
 
+CI success is tied to the tested commit and workflow scope. It does not certify production deployment or all user workflows.
 
-### Signed tenant-context RLS closure — 2026-11-09
+## 5. Database and tenant security baseline
 
-RLS implementation commit: `d901887b6d8e0d80eb7015693e3be287157f8c3a`; documentation/current branch HEAD: `c7feb2d4788ca07827c073ee10755c39e8dbadb6`.
+- Migration chain ends at `0020_payment_raw_amount_precision`.
+- Migration 0019 introduced HMAC-signed tenant context, stored verifier secret in `m369_private`, and uses a SECURITY DEFINER verifier function.
+- Tenant tables use ENABLE + FORCE RLS and signed verifier policies; `agency_notes` is intentionally deny-all for ordinary tenant runtime.
+- Catalog-driven tests discover public tables with `agency_id` so future tenant tables without expected RLS controls fail CI.
+- Cross-tenant adversarial tests cover exercised SELECT/INSERT/UPDATE/DELETE cases; latest suite includes explicit A-to-B INSERT denial.
+- Composite tenant/workspace foreign keys and restricted PostgreSQL roles provide additional isolation.
+- Super Admin uses separate auth/management DB paths; its management role has BYPASSRLS and must remain narrowly permissioned.
 
-- Migration `0019_signed_tenant_context_rls` replaces unsigned GUC policies with `public.m369_current_tenant_id()`, a SECURITY DEFINER verifier using HMAC-SHA256.
-- The verifier reads its key from `m369_private.tenant_context_secret`; the `m369_app` runtime role has no schema/table access to that secret. A separate NOLOGIN, NOBYPASSRLS function-owner role has only the required SELECT privilege.
-- All 16 tenant-owned tables now have ENABLE + FORCE RLS and tenant policies bound to the verifier: agencies, workspaces, agency_memberships, teams, team_memberships, contacts, conversations, audit_logs, subscriptions, message_attachments, channels, kb_categories, kb_articles, canned_responses, payments, messages. `agency_notes` remains deny-all for tenant runtime.
-- Python signs canonical `m369:tenant:v1:<lowercase-uuid>` values with `M369_TENANT_CONTEXT_SECRET`. The same key must be supplied to migration and API containers; production config rejects a missing/short/dev key. No production key is stored in Git.
-- API auth dependency sets signed context; transaction hook restores both GUCs only for request sessions that explicitly request persistence. Test/helper context is transaction-local by default.
-- Positive and negative PostgreSQL 16 CI suite: **73 passed, 4 deselected, 1 warning** in 12.42 seconds. Run: https://github.com/Pincodenovin13/m369-support/actions/runs/42589912453
-- Migration downgrade intentionally refuses to restore unsigned policies. Operational rollback must be a forward security migration, not a downgrade to the vulnerable model.
-- This protects against SQL-only tenant-GUC forgery. Compromise of the API process or its HMAC key remains a separate high-severity threat.
+Do not infer live production role attributes, grants, RLS policies, or secret provisioning from CI alone.
+
+## 6. Security release gates still open
+
+1. Complete route-by-route authorization and object-IDOR matrix for all agency and Super Admin routes.
+2. Verify all PostgreSQL role memberships, effective grants, SECURITY DEFINER ownership/search_path and secret access in the actual deployment database.
+3. Verify real Redis behavior, limiter fail-closed behavior, production proxy trust configuration and rate-limit keying.
+4. Review request-size limits, security headers, upload/attachment handling, webhook ingress and abuse/DoS controls.
+5. Run deployment smoke tests and independent security review before onboarding paying agencies.
+6. Inspect and resolve CI/toolchain deprecation warnings.
+7. Keep all future RLS changes covered by catalog-driven tests and hostile tenant-A/tenant-B tests.
+
+**Security status:** repository CI pass; security closure incomplete; production security certification NOT CLAIMED.
+
+## 7. Product delivery status
+
+- Dashboard redesign exists and consumes workspace API data.
+- Agency pages exist for contacts, conversations, conversation detail, teams, channels, canned responses and knowledge base; the frontend is not yet feature-complete.
+- Separate Super Admin login/MFA and initial console pages exist.
+- Frontend browser E2E tests are not implemented.
+- OpenAPI-to-TypeScript generation/drift checking is still required.
+- WhatsApp, Telegram, Instagram and Facebook integrations are roadmap requirements, not implemented channel integrations.
+- Monthly export, Human Escalation, AI usage control, BYOAI, retention/archiving and PWA are roadmap items, not current features.
+
+See `docs/architecture/future-capabilities-roadmap.md` for the approved planning baseline.
+
+## 8. Known repository/workflow consistency issues
+
+- GitHub default branch is the one-file `test/marker` branch; active code is on the branch stated above.
+- Historical branches remain visible as checkpoints. They are currently ancestors of active HEAD, not divergent lines.
+- Historical `recovery/workspace-preservation/` contains archived OpenLivery references. Its README explicitly marks those files as non-authoritative; do not import or reuse them.
+- `.github/workflows/refresh-web-lockfile.yml` automatically regenerates and commits the web lockfile and runs `npm audit fix` after manifest changes. This is a separate mutation workflow, not the read-only `npm ci` check; review its behavior before treating dependency changes as fully manual.
+- Several documentation files previously contained stale branch, migration, test-count and security claims. They are being reconciled against this state and current CI evidence.
+
+## 9. Immediate next sequence
+
+1. Finish repository/documentation consistency reconciliation without deleting historical evidence.
+2. Resolve default-branch configuration and branch protection explicitly.
+3. Continue route-by-route backend security audit and hostile tests.
+4. Finish API contract/OpenAPI drift controls.
+5. Continue frontend vertical slices against real API contracts.
+6. Only then implement integrations, Human Escalation and monthly Export, each behind security gates.

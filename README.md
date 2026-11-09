@@ -5,7 +5,7 @@
 
 ## Project Status
 
-**Phase 1 (Foundation + Multi-Tenancy + Security Hardening)** — implementation complete. Test results are **reported by Z.ai** (the implementation agent) from a local sandbox and have **not** been independently verified. See [`STATE.md`](./STATE.md) for details, blockers, and evidence.
+**Current engineering branch:** `refactor/repository-structure-unification` (HEAD `ce3d54a2df13494ee914bea2f0677dd11f736a0c`). The latest API/PostgreSQL GitHub Actions run on this exact commit completed successfully: **359 passed, 1 warning**. This is CI evidence, not production security certification. See [`STATE.md`](./STATE.md) for current evidence and limitations.
 
 - **Current state:** See [`STATE.md`](./STATE.md) for completed packages, commit references, test status, blockers, and next steps.
 - **Repository structure:** See [`REPOSITORY_MAP.md`](./REPOSITORY_MAP.md) for the authoritative file/folder responsibility map.
@@ -23,7 +23,7 @@ m369-support/
 │   └── shared/      Shared TypeScript types [PLANNED — placeholder]
 ├── infrastructure/  Database bootstrap SQL
 ├── docs/            Architecture, security, database, development docs
-├── recovery/        HISTORICAL archive (not authoritative)
+├── recovery/        HISTORICAL archive only (never implementation source)
 ├── .github/         PR template + CI workflows
 ├── docker-compose.yml
 ├── .env.example
@@ -109,20 +109,11 @@ See [`docs/README.md`](./docs/README.md) for the full documentation index. Key d
 
 ## Testing
 
-Test results use **strict verification labels** per `CONTRIBUTING.md` Rule 13. See [`STATE.md`](./STATE.md) for the full table.
+Test results use strict evidence labels. Latest API/PostgreSQL CI: [run 42646416006](https://github.com/Pincodenovin13/m369-support/actions/runs/42646416006) — **359 passed, 1 warning**, exact commit `ce3d54a2df13494ee914bea2f0677dd11f736a0c`. Latest frontend CI: [run 42628470610](https://github.com/Pincodenovin13/m369-support/actions/runs/42628470610) — success on the current frontend code snapshot. Production Redis, deployment topology, and persistent production database remain unverified.
 
 ```bash
-# Backend (346 test functions; Z.ai-REPORTED passing, NOT independently verified — sandbox lacks sqlalchemy)
-cd apps/api
-python3 -m pytest -q
-
-# Frontend type-check (INDEPENDENTLY VERIFIED PASS, 2026-11-08)
-cd apps/web
-npm run type-check
-
-# Frontend build + lint (Z.ai-REPORTED only)
-npm run build
-npm run lint
+cd apps/api && pytest -q tests
+cd apps/web && npm ci && npm run type-check && npm run lint && npm run build
 ```
 
 ## License

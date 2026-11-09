@@ -24,12 +24,16 @@ These are the authoritative sources of truth. When in doubt, consult these first
 
 ### Architecture
 
+| Future Capabilities Roadmap | [`docs/architecture/future-capabilities-roadmap.md`](./architecture/future-capabilities-roadmap.md) | Planned integrations, monthly export, escalation, AI controls, retention and PWA; planning only |
+
 | Document | Path | Description |
 |---|---|---|
 | Architecture overview | [`docs/architecture/overview.md`](./architecture/overview.md) | ASCII system diagram, tenant hierarchy, design principles |
 | Phase 1 scope | [`docs/architecture/phase-1.md`](./architecture/phase-1.md) | What's implemented, what's deferred, what's blocked |
 
 ### Security
+
+| Phase 1 Security Closure | [`docs/security/phase1-security-closure-2026-11-09.md`](./security/phase1-security-closure-2026-11-09.md) | Latest PostgreSQL CI evidence and production security limitations |
 
 | Document | Path | Description |
 |---|---|---|

@@ -11,9 +11,9 @@ This document defines the canonical Git workflow, branch strategy, commit conven
 
 ### 1.1 Canonical Branch
 
-`phase-1/foundation` is the **single canonical development branch**. All completed work lives here. All new branches start from here.
+`refactor/repository-structure-unification` is the **active development/integration branch** as of 2026-11-09. New work must branch from its latest verified HEAD. `phase-1/foundation` and the other `phase-1/*` refs are historical checkpoints, not active integration targets.
 
-> **Note on GitHub default branch:** GitHub's configured default branch is `test/marker` (verified 2026-11-08 via `git ls-remote --symref origin HEAD` returning `ref: refs/heads/test/marker HEAD` and via the public GitHub HTML page metadata `"defaultBranch":"test/marker"`). The default branch has NOT been changed by this or any prior task. Changing it requires explicit Product Owner + Technical Manager approval and is out of scope here.
+> **Note on GitHub default branch:** GitHub's configured default branch is still `test/marker`, whose current tree contains only `MARKER.txt`. It is NOT the development source of truth. Changing the repository default branch to the active branch is a pending repository-admin setting change; until it is changed, always explicitly target `refactor/repository-structure-unification` in tools and PRs.
 
 ### 1.2 Branch Naming
 
@@ -30,11 +30,11 @@ Every branch must follow one of these prefixes:
 
 ### 1.3 Branch Lifecycle
 
-1. Branch from `phase-1/foundation` (or from the latest integration tip if the foundation push is pending).
+1. Branch from the latest verified `refactor/repository-structure-unification` HEAD.
 2. Commit focused, atomic changes.
-3. Open a PR into `phase-1/foundation`.
-4. After PR is reviewed + merged: **delete the source branch** (unless it is `phase-1/security-closure-b1-4`, which is preserved as historical evidence until the Product Owner explicitly approves deletion).
-5. **No long-lived feature branches.** A branch older than 14 days without a PR is stale — rebase or delete.
+3. Open a PR into `refactor/repository-structure-unification` (once PR-based protection is configured).
+4. Preserve existing historical checkpoint/recovery branches. Do NOT delete any existing branch as part of cleanup without an explicit Product Owner decision after ancestry and artifact verification.
+5. **No new long-lived feature branches.** Existing historical branches are retained as audit checkpoints; do not mistake them for active workstreams.
 
 ### 1.4 Prohibited Branch Practices
 
