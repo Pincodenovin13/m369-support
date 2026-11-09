@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +158,13 @@ class PaymentOut(BaseModel):
     currency: str
     paid_currency: str | None
     paid_amount_raw: int | None
+
+    @field_serializer("paid_amount_raw")
+    def serialize_paid_amount_raw(self, value: int | None) -> str | None:
+        # Blockchain raw units may exceed JavaScript's safe integer range.
+        # Serialize as a decimal string so browser clients never round them.
+        return str(value) if value is not None else None
+
     paid_amount_decimals: int | None
     exchange_rate: float | None
     status: str
@@ -181,7 +188,7 @@ class PaymentVerifyRequest(BaseModel):
 
     amount_paid: int = Field(ge=0)  # cents, in base currency
     paid_currency: str | None = Field(default=None, min_length=3, max_length=10)  # ISO 4217 or crypto code (e.g., USDT)
-    paid_amount_raw: int | None = Field(default=None, ge=0)
+    paid_amount_raw: int | None = Field(default=None, ge=0, le=10**78 - 1)
     paid_amount_decimals: int | None = Field(default=None, ge=0, le=18)
     exchange_rate: float | None = Field(default=None, gt=0)
     network: str | None = Field(default=None, max_length=20)
