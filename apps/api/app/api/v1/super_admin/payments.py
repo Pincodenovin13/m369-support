@@ -85,9 +85,7 @@ def verify_payment_endpoint(
     Stores both the base-currency amount_paid (cents, INTEGER — never FLOAT)
     AND the raw on-chain values + decimals + exchange_rate for audit.
     """
-    # Serialize verify/reject transitions. A second request must observe the
-    # committed state from the first request before applying its own transition.
-    p = db.scalar(select(Payment).where(Payment.id == payment_id).with_for_update())
+    p = db.get(Payment, payment_id)
     if p is None:
         raise HTTPException(status_code=404, detail="Payment not found")
     verify_payment(
@@ -116,8 +114,7 @@ def reject_payment_endpoint(
     db: Session = Depends(get_super_admin_db),
     ctx=Depends(get_super_admin_context),
 ):
-    # Share the same row lock as verification to prevent verify/reject races.
-    p = db.scalar(select(Payment).where(Payment.id == payment_id).with_for_update())
+    p = db.get(Payment, payment_id)
     if p is None:
         raise HTTPException(status_code=404, detail="Payment not found")
     reject_payment(

@@ -74,11 +74,8 @@ class SuperAdminMFASetupResponse(BaseModel):
 
 
 class SuperAdminMFAEnableRequest(BaseModel):
-    """Activate MFA — re-confirm password and submit a TOTP proof."""
+    """Activate MFA — submit a TOTP code from the just-setup secret."""
 
-    # A stolen long-lived access token alone must not be enough to bind an
-    # attacker-controlled authenticator to the administrator account.
-    password: str = Field(min_length=1, max_length=128)
     secret: str = Field(min_length=16, max_length=64)
     code: str = Field(min_length=6, max_length=8)
 

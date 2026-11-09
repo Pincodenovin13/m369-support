@@ -66,9 +66,7 @@ def update_subscription(
     db: Session = Depends(get_super_admin_db),
     ctx=Depends(get_super_admin_context),
 ):
-    # Lock the row before checking the state machine to serialize concurrent
-    # status transitions and prevent stale-state overwrites.
-    s = db.scalar(select(Subscription).where(Subscription.id == subscription_id).with_for_update())
+    s = db.get(Subscription, subscription_id)
     if s is None:
         raise HTTPException(status_code=404, detail="Subscription not found")
     update_subscription_status(

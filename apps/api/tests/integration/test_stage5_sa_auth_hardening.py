@@ -452,7 +452,7 @@ def test_mfa_enrollment_and_disable_are_rate_limited(client: TestClient, setup_s
         "app.api.v1.super_admin.auth.check_verify_mfa_rate_limit",
         record_limit,
     )
-    secret, recovery_codes = _setup_mfa_for_admin(client, token)
+    secret, recovery_codes = _setup_mfa_for_admin(client, token, password="correct-password-123")
 
     # Enrollment must revoke the pre-MFA session.
     stale = client.get("/api/v1/super-admin/auth/me", headers=_h(token))
@@ -489,6 +489,35 @@ def test_mfa_enrollment_and_disable_are_rate_limited(client: TestClient, setup_s
     # Disabling MFA revokes the just-used session as well.
     stale_after_disable = client.get("/api/v1/super-admin/auth/me", headers=_h(fresh_token))
     assert stale_after_disable.status_code == 401
+def test_mfa_enrollment_requires_password_confirmation(client: TestClient, setup_session: Session):
+    """A stolen access token cannot enroll an attacker-controlled MFA secret."""
+    admin = _make_sa(setup_session, password="correct-password-123")
+    token = _sa_token(admin)
+    setup = client.post("/api/v1/super-admin/auth/mfa/setup", headers=_h(token))
+    assert setup.status_code == 200, setup.text
+    secret = setup.json()["secret"]
+    s = get_settings()
+    code = pyotp.TOTP(secret, digits=s.totp_digits, interval=s.totp_step_seconds).now()
+
+    rejected = client.post(
+        "/api/v1/super-admin/auth/mfa/enable",
+        headers=_h(token),
+        json={"password": "wrong-password", "secret": secret, "code": code},
+    )
+    assert rejected.status_code == 401
+
+    setup_session.expire_all()
+    stored = setup_session.get(SuperAdmin, admin.id)
+    assert stored is not None and stored.mfa_enabled is False
+
+    accepted = client.post(
+        "/api/v1/super-admin/auth/mfa/enable",
+        headers=_h(token),
+        json={"password": "correct-password-123", "secret": secret, "code": code},
+    )
+    assert accepted.status_code == 200, accepted.text
+
+
 def test_11_mfa_enabled_no_full_jwt_without_code(client: TestClient, setup_session: Session):
     """Test 11: If MFA is enabled, password alone does NOT issue a full JWT."""
     admin = _make_sa(setup_session, password="correct-password-123")
