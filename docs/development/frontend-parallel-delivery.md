@@ -31,6 +31,17 @@ Build the Agency Portal and Super Admin Console in parallel with backend hardeni
 4. Use mobile-first responsive layouts; test narrow mobile, tablet, laptop, and desktop breakpoints.
 5. Add component/unit tests and browser-level critical-path tests before declaring a UI slice complete.
 
+
+## Frontend foundation CI evidence — 2026-11-09
+
+- Tested commit: `a6e3f13eaee2b3c0029accbe43e6fe108e76669e`
+- Workflow: [Web frontend CI](https://github.com/Pincodenovin13/m369-support/actions/runs/42615796288)
+- Result: **success** — dependency install, dependency audit, TypeScript, ESLint, and production build all passed.
+- Dependency audit: **0 vulnerabilities** after updating the pinned manifest and regenerating the lockfile.
+- Lockfile commit: `cb9a74bd95f5` (`chore(web): refresh dependency lockfile`).
+- Verified stack: Next.js 15.5.29, React 19.0.1, PostCSS 8.5.32, Node.js 20.20.2 in CI.
+- The current frontend still has no browser-level end-to-end test suite. The production build passing does not prove every user workflow works against a deployed API.
+
 ## Integration defects found and corrected in the first frontend slice
 
 The first backend/frontend contract review found real mismatches. These were corrected in the shared API client and the affected pages:
