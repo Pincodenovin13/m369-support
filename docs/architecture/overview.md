@@ -63,10 +63,13 @@ JWT decoders are type-strict: a `super_admin` token can never be decoded as an `
 
 ## Defense-in-Depth Tenant Isolation
 
-1. **Database RLS** — all 8 tenant-owned tables, fail-closed when `app.tenant_id` unset
-2. **Composite FK constraints** — 4 constraints prevent cross-tenant references
+1. **Database RLS** — 17 RLS-protected tables (16 tenant-scoped + 1 platform-private), fail-closed when `app.tenant_id` unset
+2. **Composite FK constraints** — 16 constraints prevent cross-tenant references, including workspace/agency checks for contacts and teams
 3. **TenantContextMiddleware** — resolves JWT, builds `TenantContext`
 4. **`SET LOCAL app.tenant_id`** — transaction-scoped, no leak across pooled connections
 5. **`assert_tenant_owned()`** — application-level ownership check, fail-closed (404)
 
 See `docs/security/tenant-isolation.md` for details.
+
+
+**Security boundary:** RLS policies currently trust the transaction-local `app.tenant_id` GUC set by the API. This blocks ordinary missing-filter/query mistakes, but a party able to execute arbitrary SQL as `m369_app` can set that custom GUC. Signed tenant-context verification or a stronger per-tenant database identity boundary remains a production hardening requirement. See [tenant isolation](../security/tenant-isolation.md).

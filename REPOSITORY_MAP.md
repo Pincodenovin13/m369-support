@@ -24,7 +24,7 @@ m369-support/
 ├── docs/                        # Architecture, security, database, development docs
 ├── recovery/                    # HISTORICAL archive — not authoritative
 │   └── workspace-preservation/ # Archived artifacts from prior sessions
-├── .github/                     # GitHub config (PR template, CI workflows)
+├── .github/                     # GitHub config (PR template only; no CI workflow tracked)
 ├── docker-compose.yml           # Local dev orchestration (db + redis + api)
 ├── .env.example                 # Environment variable template (no secrets)
 ├── .gitignore                   # Python + Node + IDE + env patterns
@@ -68,10 +68,10 @@ m369-support/
 
 | Metric | Value |
 |---|---|
-| Backend source files (`apps/api/app/**/*.py`) | 49 |
-| Backend test files (`apps/api/tests/**/*.py`) | 22 (3 unit + 15 integration + 4 `__init__.py`/`conftest.py`) |
+| Backend source files (`apps/api/app/**/*.py`) | 58 |
+| Backend test/support Python files (`apps/api/tests/**/*.py`) | 24 |
 | Static test function count | 346 (NOT independently verified — see STATE.md) |
-| Migrations | 16 (0001–0016, linear chain) |
+| Migrations | 18 (0001–0018, linear chain) |
 | Database tables | 25 (14 in `models/__init__.py` + 11 in `models/phase1_extended.py`) |
 | API endpoints | 64 (verified via `grep -rhE '@router\.(get\|post\|put\|patch\|delete)'`) |
 | Database roles | 6 (`m369_app`, `m369_sa_auth`, `m369_sa_runner`, `m369_login_reader`, `m369_registration_guard`, `m369_super_admin` neutralized) |
@@ -97,7 +97,7 @@ m369-support/
 
 | Metric | Value |
 |---|---|
-| Frontend source files (`apps/web/src/**/*`) | 10 |
+| Frontend source files (`apps/web/src/**/*`) | 19 |
 | Frontend config files | 8 |
 | Frontend test files | 0 (NOT IMPLEMENTED — Phase 1 has no frontend test suite) |
 | Frontend type-check (`tsc --noEmit`) | ✅ Independently verified PASS (2026-11-08) |

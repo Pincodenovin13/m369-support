@@ -15,19 +15,19 @@ the full test evidence, blockers, and verification status.
 - ✅ Monorepo structure (apps/api, apps/web, apps/widget, packages/, infrastructure/, docs/)
 - ✅ Backend: FastAPI 0.115 + SQLAlchemy 2.0 + Alembic + Pydantic 2 + psycopg 3
 - ✅ Frontend: Next.js 15 + React 19 + TypeScript + Tailwind CSS + TanStack Query
-- ✅ Database schema: 25 tables (excluding alembic_version) with RLS on 16 tenant-owned tables
-- ✅ 14 composite FK constraints preventing cross-tenant references
+- ✅ Database schema: 25 tables (excluding alembic_version) with RLS on 17 tables: 16 tenant-scoped + 1 platform-private
+- ✅ 16 composite FK constraints preventing cross-tenant/workspace references (including contacts and teams via migration 0018)
 - ✅ JWT with `type` claim + separate signing keys (agency vs super_admin)
 - ✅ Argon2id password hashing (RFC 9106)
 - ✅ Auth flow: register, login, refresh (JSON + cookie), logout (server-side revocation), /me
-- ✅ Tenant context middleware + `SET LOCAL app.tenant_id` (transaction-scoped)
+- ✅ Tenant context middleware + transaction-scoped `SET LOCAL app.tenant_id` (trusted-API boundary; arbitrary SQL under m369_app can spoof the custom GUC)
 - ✅ Role-based access control (owner, admin, manager, agent, viewer)
 - ✅ ~80 API endpoints (agency + Super Admin)
 - ✅ Super Admin authentication with TOTP MFA (RFC 6238)
 - ✅ Server-side session revocation via token_version (both agency and Super Admin)
 - ✅ Brute-force protection (atomic counter, lockout, no email enumeration)
 - ✅ Rate limiting (custom Redis INCR+EXPIRE Lua, per-IP + per-account, fail-closed)
-- ✅ Three-role database model: m369_app (RLS), m369_sa_auth (login only), m369_sa_runner (BYPASSRLS management)
+- ✅ Six-role database model: m369_app, m369_sa_auth, m369_sa_runner, m369_login_reader, m369_registration_guard, and neutralized m369_super_admin
 - ✅ Registration guard (SECURITY DEFINER function + advisory lock)
 - ✅ m369_super_admin role neutralized (was BYPASSRLS + broad DML; now inert)
 - ✅ Subscription lifecycle (trial → active → past_due → suspended → cancelled)

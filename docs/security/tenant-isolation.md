@@ -1,69 +1,65 @@
-# Tenant Isolation — How It Works
+# Tenant Isolation — Current Design and Security Boundaries
 
-M369 Support uses **defense in depth** for tenant isolation. No single layer is trusted alone.
+M369 uses layered tenant isolation. The database schema, API authorization, and request-scoped tenant context must agree; none of these layers should be treated as a substitute for the others.
 
-## Layer 1: Database RLS
+## 1. Row-Level Security
 
-Every tenant-owned table has RLS enabled with `FORCE ROW LEVEL SECURITY`.
+RLS is enabled and forced on **17 tables**:
 
-### Policy pattern (current — NO `app.bypass_rls`)
-
-```sql
-CREATE POLICY tenant_isolation_<table> ON <table>
-USING (
-    <filter_column>::text = current_setting('app.tenant_id', true)
-)
-WITH CHECK (
-    <filter_column>::text = current_setting('app.tenant_id', true)
-);
-```
-
-- `USING` filters rows on SELECT, UPDATE, DELETE
-- `WITH CHECK` validates rows on INSERT, UPDATE
-- `current_setting('app.tenant_id', true)` returns empty string when unset → RLS fails closed
-- **There is NO bypass mechanism in RLS policies.** The previous `app.bypass_rls` GUC was a security vulnerability — any database user could `SET LOCAL` it. It has been removed entirely.
-
-### Tables with RLS (17)
-
-| Group | Tables | Filter column |
+| Group | Tables | Policy |
 |---|---|---|
-| Initial (migration 0001) | `agencies`, `workspaces`, `agency_memberships`, `teams`, `team_memberships`, `contacts`, `conversations`, `audit_logs` | `agency_id` (or `id` for `agencies`) |
-| Phase 1 extended (migration 0006) | `messages`, `channels`, `kb_categories`, `kb_articles`, `canned_responses`, `payments` | `agency_id` |
-| Hardened (migration 0011) | `subscriptions`, `message_attachments`, `agency_notes` | `agency_id` |
+| Initial (0001) | `agencies`, `workspaces`, `agency_memberships`, `teams`, `team_memberships`, `contacts`, `conversations`, `audit_logs` | Tenant policy; `agencies.id` or `agency_id` |
+| Extended (0006) | `messages`, `channels`, `kb_categories`, `kb_articles`, `canned_responses`, `payments` | Tenant policy on `agency_id` |
+| Hardened (0011) | `subscriptions`, `message_attachments` | Tenant policy on `agency_id` |
+| Platform-private (0011) | `agency_notes` | `USING (false)` and `WITH CHECK (false)`; Super Admin runner bypasses RLS |
 
-## Layer 2: Composite Foreign Keys
+Therefore, **16 tables use an agency-specific RLS policy** and one platform-private table uses a deny-all policy for roles subject to RLS.
 
-10 composite FK constraints enforce that a child row's `agency_id` matches its parent's `agency_id` — preventing cross-tenant references even when an attacker knows a foreign UUID. Examples: `messages(conversation_id, agency_id) → conversations(id, agency_id)`, `message_attachments(message_id, agency_id) → messages(id, agency_id)`.
+Tenant policies compare the row's agency identifier with `current_setting('app.tenant_id', true)`. Missing tenant context fails closed. All listed tables use both `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY`.
 
-## Layer 3: Application — Tenant Context Middleware
+There is no `app.bypass_rls` policy or GUC-based Super Admin bypass.
 
-`TenantContextMiddleware` resolves the JWT (agency or super_admin) from `Authorization: Bearer <token>` or HttpOnly cookies, stores `TenantContext` on `request.state.tenant`.
+## 2. Composite Foreign Keys
 
-## Layer 4: `SET LOCAL app.tenant_id`
+There are **16 composite foreign-key constraints** protecting tenant/workspace relationships:
 
-`set_tenant_context(db, agency_id)` issues `SET LOCAL app.tenant_id = '<uuid>'` on the SQLAlchemy session. `SET LOCAL` is transaction-scoped — pooled connections cannot leak tenant scope to the next request.
+- Initial schema (0001): `fk_team_memberships_team_agency`, `fk_conversations_contact_workspace`, `fk_conversations_assignee_agency`, `fk_conversations_team_agency`.
+- Tenant hardening (0011; one FK's delete behavior corrected in 0012): `fk_channels_workspace_agency`, `fk_kb_categories_workspace_agency`, `fk_kb_categories_parent_ws_agency`, `fk_kb_articles_workspace_agency`, `fk_kb_articles_category_ws_agency`, `fk_canned_responses_workspace_agency`, `fk_conversations_workspace_agency`, `fk_payments_subscription_agency`, `fk_messages_reply_to_agency`, `fk_message_attachments_message_agency`.
+- Workspace consistency correction (0018): `fk_contacts_workspace_agency`, `fk_teams_workspace_agency`.
 
-## Layer 5: `assert_tenant_owned()`
+Migration 0018 validates existing data before adding the last two constraints. It aborts rather than silently accepting mismatched contacts or teams.
 
-Fail-closed ownership check after fetching records. A record without `agency_id` is rejected, not silently returned.
+## 3. Request Authentication and Tenant Context
 
-## Super Admin Access (NOT a bypass)
+- `TenantContextMiddleware` decodes the agency or Super Admin JWT and stores a context on `request.state`.
+- `get_current_user` checks the user exists, is active, and the JWT `tver` matches the database `token_version`.
+- `get_current_agency_id` verifies active membership in the agency and that the agency itself is active.
+- `require_role(...)` checks the membership role for write/admin operations.
+- `set_tenant_context` sets `app.tenant_id` transaction-locally. The SQLAlchemy `after_begin` listener re-applies the tenant value after a transaction boundary using the validated session value.
 
-Super Admin tokens do NOT carry `agency_id`. They see no tenant data by default. Super Admin operations use a **separate database connection** with a role that has the `BYPASSRLS` attribute (`m369_sa_runner` for management, `m369_sa_auth` for login). The `m369_app` role used by the API service is fully revoked from Super Admin tables and has NO `BYPASSRLS` privilege.
+The API also adds explicit agency predicates to tenant queries. These predicates are defense in depth; RLS and composite constraints remain necessary.
 
-There is **no `bypass_rls_for_super_admin(db)` function** and no `app.bypass_rls` GUC. The previous bypass mechanism was a security vulnerability and has been removed.
+## 4. Database Roles and Privileges
 
-## Database Roles (6)
+| Role | LOGIN | BYPASSRLS | Intended use |
+|---|---:|---:|---|
+| `m369_app` | Yes | No | Agency API runtime |
+| `m369_sa_auth` | Yes | No | Super Admin login/MFA only |
+| `m369_sa_runner` | Yes | Yes | Super Admin management; table grants are restricted |
+| `m369_login_reader` | No | Yes | Owner of the narrowly scoped login membership function; SELECT on agencies/memberships only |
+| `m369_registration_guard` | No | Yes | Owner of the initial-registration check function |
+| `m369_super_admin` | No | No | Neutralized legacy role; no active privilege path |
 
-| Role | LOGIN | BYPASSRLS | Purpose |
-|---|---|---|---|
-| `m369_app` | ✅ | ❌ | Ordinary tenant operations (RLS-enforced) — used by API service |
-| `m369_sa_auth` | ✅ | ❌ | Super Admin login + MFA verify (column-level UPDATE on `super_admins`) |
-| `m369_sa_runner` | ✅ | ✅ | Super Admin management (BYPASSRLS, least-privilege) |
-| `m369_login_reader` | ❌ | ✅ | SECURITY DEFINER function owner (login helper) |
-| `m369_registration_guard` | ❌ | ✅ | Registration check function owner |
-| `m369_super_admin` | ❌ | ❌ | Neutralized (was BYPASSRLS + broad DML; now inert) |
+Migration 0017 removes `CREATE` on schema `public` from `m369_app` and `PUBLIC`, while preserving `USAGE`. The bootstrap script now grants schema `USAGE`, not `ALL`.
 
-## Verification
+## 5. Important Trust Boundary — Tenant GUC
 
-RLS tests are in `apps/api/tests/integration/test_security_tenant_isolation.py` and `test_rls_bypass_attack.py`. Test execution status: Z.ai-reported, NOT independently verified (sandbox lacks sqlalchemy). See `/STATE.md`.
+**RLS based on `app.tenant_id` is not, by itself, protection against an attacker who can execute arbitrary SQL as `m369_app`.** PostgreSQL custom GUCs such as `app.tenant_id` can be set by that database role. Someone with arbitrary SQL execution under the shared runtime credential could change the value and attempt to read another tenant's rows.
+
+The current design therefore relies on the API being the trusted holder of the database credential and on preventing SQL injection. RLS protects against missing tenant filters and ordinary application query mistakes; it does not cryptographically authenticate the tenant identity to PostgreSQL. If the threat model includes arbitrary SQL execution or compromise of the runtime DB credential, a signed tenant-context verification mechanism (or a stronger per-tenant DB identity boundary) is a required follow-up before production.
+
+The existing `test_rls_bypass_attack.py` verifies that `app.bypass_rls` cannot disable policies. It does **not** prove that `app.tenant_id` itself cannot be spoofed.
+
+## 6. Verification Status
+
+Migrations 0017 and 0018 and regression tests were added to the repository. Their tests have **not yet been executed** in this session. Do not treat them as passing until run against PostgreSQL 16 using the migration chain from 0001 through 0018.

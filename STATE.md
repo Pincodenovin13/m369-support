@@ -1,11 +1,11 @@
 # M369 Support — Project State
 
-> **Last updated:** 2026-11-08 (UTC+8) — third update after repository structure unification + frontend buildout
+> **Last updated:** 2026-11-09 — tenant-isolation review and two corrective migrations
 > **Canonical development branch:** `phase-1/foundation`
-> **Current working branch:** `refactor/repository-structure-unification` (HEAD: `9a6e98f3b92d776ad03e594fdd1fc316d41b1eb8`)
+> **Current working branch:** `refactor/repository-structure-unification` (HEAD: `94381f30912f51feb0b2b9dd54c8d7628d54c058`)
 > **Recovery branch:** `recovery/zai-workspace-2026-11-08` (HEAD: `1c3294154b41e051855613416f0bc68c3901d125`)
-> **Tracked files:** 175 (was 168 at start of this task)
-> **Migration head (filesystem):** `0016_extend_login_helper_with_agency_name` (unchanged — 16 migrations, linear chain)
+> **Tracked files:** 179 (was 168 at start of this task)
+> **Migration head (filesystem):** `0018_workspace_agency_fks_contacts_teams` (18 migrations, linear chain)
 > **Migration head (database-applied):** UNVERIFIED — no reachable DB in audit sandbox
 
 ---
@@ -61,10 +61,12 @@ All test results below are **reported by Z.ai** (the implementation agent) from 
   → 0013_package_b1_2_final_security
   → 0014_agency_user_token_version
   → 0015_revoke_super_admin_memberships_both_directions
-  → 0016_extend_login_helper_with_agency_name    ← HEAD
+  → 0016_extend_login_helper_with_agency_name
+  → 0017_revoke_runtime_schema_create
+  → 0018_workspace_agency_fks_contacts_teams    ← HEAD
 ```
 
-**Filesystem head:** `0016_extend_login_helper_with_agency_name` (16 migrations, linear chain, verified)
+**Filesystem head:** `0018_workspace_agency_fks_contacts_teams` (18 migrations, linear chain, verified from tracked migration files)
 **Database-applied head:** UNVERIFIED — `alembic` not run in audit sandbox; no reachable DB
 
 ---
@@ -135,3 +137,17 @@ All test results below are **reported by Z.ai** (the implementation agent) from 
 | ⏳ PLANNED | Not yet implemented |
 | ❌ BLOCKED | Cannot verify due to environment limitations |
 | 🚫 NOT IMPLEMENTED | Feature does not exist |
+
+
+## 2026-11-09 Tenant-Isolation Corrections (ChatGPT repository commits)
+
+| Commit | Change | Verification |
+|---|---|---|
+| `d9d945c` | Migration 0017 revokes schema CREATE from `m369_app` and PUBLIC; bootstrap grants USAGE only to runtime roles | Committed and fetched back from GitHub; PostgreSQL test not run here |
+| `94381f3` | Migration 0018 adds composite workspace/agency FKs for `contacts` and `teams`, after fail-closed data validation | Committed and fetched back from GitHub; PostgreSQL test not run here |
+
+Two integration test files were added for schema privileges and cross-agency workspace references. They have not been executed in this session.
+
+### Tenant GUC trust-boundary finding
+
+RLS policies compare tenant rows against the custom GUC `app.tenant_id`. A database role that can execute arbitrary SQL as `m369_app` can set that GUC to another agency ID. Existing bypass tests only prove that the removed `app.bypass_rls` GUC cannot disable RLS; they do not prevent spoofing `app.tenant_id`. The current model protects against ordinary API query omissions but does not cryptographically protect against arbitrary SQL execution under the shared runtime credential. Signed tenant-context verification or a stronger database identity boundary is a required production hardening decision.
