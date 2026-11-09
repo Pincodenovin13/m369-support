@@ -7,7 +7,7 @@ from app.tenancy.context import tenant_context_signature
 APP_DB_URL = "postgresql://m369_app:m369_app_dev_password@localhost:5432/m369_support_test"
 pytestmark = [pytest.mark.security, pytest.mark.integration]
 
-def test_unsigned_and_forged_context_fail_closed():
+def test_unsigned_and_forged_context_fail_closed(db_engine):
     a, b = str(uuid.uuid4()), str(uuid.uuid4())
     with psycopg.connect(APP_DB_URL) as conn:
         with conn.cursor() as cur:
@@ -21,7 +21,7 @@ def test_unsigned_and_forged_context_fail_closed():
             cur.execute("SELECT public.m369_current_tenant_id()")
             assert cur.fetchone()[0] is None
 
-def test_all_tenant_tables_have_force_rls_and_signed_policy():
+def test_all_tenant_tables_have_force_rls_and_signed_policy(db_engine):
     tables = ["agencies","workspaces","agency_memberships","teams","team_memberships","contacts","conversations","audit_logs","subscriptions","message_attachments","channels","kb_categories","kb_articles","canned_responses","payments","messages"]
     with psycopg.connect(APP_DB_URL) as conn:
         with conn.cursor() as cur:
@@ -30,3 +30,10 @@ def test_all_tenant_tables_have_force_rls_and_signed_policy():
                 row = cur.fetchone()
                 assert row and row[0] and row[1], f"{table} missing ENABLE/FORCE RLS"
                 assert row[2] and "m369_current_tenant_id" in row[2], f"{table} not protected by verifier"
+
+def test_runtime_cannot_read_private_hmac_secret(db_engine):
+    with psycopg.connect(APP_DB_URL) as conn:
+        with conn.cursor() as cur:
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                cur.execute("SELECT secret FROM m369_private.tenant_context_secret")
+            conn.rollback()
