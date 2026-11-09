@@ -751,13 +751,13 @@ def test_every_super_admin_endpoint_requires_auth(client: TestClient):
 
 
 def test_migration_chain_complete(db_engine):
-    """All migrations through 0010 are applied — alembic_version shows 0010."""
+    """The complete migration chain is applied through signed-RLS revision 0019."""
     conn = psycopg.connect("postgresql://postgres@localhost:5432/m369_support_test")
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
             v = cur.fetchone()[0]
-            assert v == "0016_extend_login_helper_with_agency_name", f"migration chain incomplete: head is {v}, expected 0016_extend_login_helper_with_agency_name"
+            assert v == "0019_signed_tenant_context_rls", f"migration chain incomplete: head is {v}, expected 0019_signed_tenant_context_rls"
     finally:
         conn.close()
 
