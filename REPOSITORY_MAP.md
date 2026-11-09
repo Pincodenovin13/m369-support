@@ -22,8 +22,8 @@ m369-support/
 ├── infrastructure/
 │   └── database/               # PostgreSQL bootstrap SQL
 ├── docs/                        # Architecture, security, database, development docs
-├── recovery/                    # HISTORICAL archive — not authoritative
-│   └── workspace-preservation/ # Archived artifacts from prior sessions
+├── recovery/                    # HISTORICAL archive — excluded from implementation discovery
+│   └── workspace-preservation/ # Provenance only; never runtime/source of truth
 ├── .github/                     # GitHub Actions security CI + repository templates
 ├── docker-compose.yml           # Local dev orchestration (db + redis + api)
 ├── .env.example                 # Environment variable template (no secrets)
@@ -64,7 +64,7 @@ m369-support/
 | `apps/api/requirements.txt` | Runtime Python deps | — | Runtime deps only | Dev/test deps |
 | `apps/api/requirements-dev.txt` | Dev/test Python deps | — | Dev/test deps only (pytest, ruff, mypy, fakeredis) | Runtime deps |
 
-### Backend statistics (verified 2026-11-08)
+### Backend statistics (tree-counted on 2026-11-09)
 
 | Metric | Value |
 |---|---|
@@ -157,7 +157,7 @@ See [`docs/README.md`](./docs/README.md) for the documentation index.
 
 | `.github/dependabot.yml` | Weekly dependency update PR configuration for npm and GitHub Actions |
 | `.github/workflows/web-ci.yml` | Read-only web validation: `npm ci`, npm audit, TypeScript, ESLint, production build |
-| `.github/workflows/refresh-web-lockfile.yml` | Mutating lockfile refresh workflow; review separately because it runs `npm install` and `npm audit fix` and pushes a commit to the active branch |
+| `.github/workflows/refresh-web-lockfile.yml` | REMOVED 2026-11-09: lockfile mutation is manual and reviewable; CI uses `npm ci` only |
 
 | Path | Responsibility |
 |---|---|
