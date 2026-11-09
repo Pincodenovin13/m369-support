@@ -23,6 +23,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: api-postgres-security-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   postgres-tests:
     runs-on: ubuntu-latest
