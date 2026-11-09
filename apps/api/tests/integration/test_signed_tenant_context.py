@@ -77,6 +77,59 @@ def test_every_tenant_table_has_one_forced_signed_policy(db_engine):
                 assert row[3] and row[4] and row[5], f"{table} policy is not signed in USING and WITH CHECK"
 
 
+
+def test_all_agency_id_tables_are_forced_and_policy_protected(db_engine):
+    """Discover tenant tables from PostgreSQL itself, not a hand-maintained list.
+
+    Any newly-added public table carrying agency_id must enable and FORCE RLS.
+    Every such table must have exactly one policy. Tenant tables must use the
+    signed verifier in both USING and WITH CHECK; agency_notes is the explicit
+    platform-private deny-all exception.
+    """
+    with psycopg.connect(APP_DB_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, "
+                "count(p.oid), "
+                "bool_and(COALESCE(pg_get_expr(p.polqual,p.polrelid),'') "
+                "LIKE '%%m369_current_tenant_id%%'), "
+                "bool_and(COALESCE(pg_get_expr(p.polwithcheck,p.polrelid),'') "
+                "LIKE '%%m369_current_tenant_id%%'), "
+                "bool_and(COALESCE(pg_get_expr(p.polqual,p.polrelid),'')='false' "
+                "AND COALESCE(pg_get_expr(p.polwithcheck,p.polrelid),'')='false') "
+                "FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='agency_id' "
+                "AND a.attnum>0 AND NOT a.attisdropped "
+                "LEFT JOIN pg_policy p ON p.polrelid=c.oid "
+                "WHERE n.nspname='public' AND c.relkind IN ('r','p') "
+                "GROUP BY c.oid,c.relname,c.relrowsecurity,c.relforcerowsecurity "
+                "ORDER BY c.relname"
+            )
+            rows = cur.fetchall()
+            assert rows, "No agency_id tables discovered; schema inventory query is broken"
+            discovered = {row[0] for row in rows}
+            expected = set(TENANT_TABLES) | {"agency_notes"}
+            assert discovered == expected, (
+                "agency_id table inventory drift: "
+                f"missing from security policy inventory={sorted(discovered - expected)}; "
+                f"stale expected entries={sorted(expected - discovered)}"
+            )
+            for name, enabled, forced, policy_count, signed_using, signed_check, deny_all in rows:
+                assert enabled and forced, (
+                    f"{name}: agency_id table must ENABLE and FORCE ROW LEVEL SECURITY"
+                )
+                assert policy_count == 1, (
+                    f"{name}: expected exactly one policy, found {policy_count}; "
+                    "permissive policies combine with OR and can bypass isolation"
+                )
+                if name == "agency_notes":
+                    assert deny_all, "agency_notes must remain explicitly deny-all"
+                else:
+                    assert signed_using and signed_check, (
+                        f"{name}: policy must verify signed tenant context in USING and WITH CHECK"
+                    )
+
 def test_platform_private_agency_notes_remains_deny_all(db_engine):
     with psycopg.connect(APP_DB_URL) as conn:
         with conn.cursor() as cur:
