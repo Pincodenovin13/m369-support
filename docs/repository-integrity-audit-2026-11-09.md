@@ -44,7 +44,7 @@ These references can mislead contributors/agents even though they do not directl
 
 ### 4. Historical recovery archive
 
-`recovery/workspace-preservation/` contains 16 historical artifacts, including legacy design documents with OpenLivery references. Its README clearly labels the folder historical/non-authoritative and says not to use it as implementation source. The archive is not a substitute for current source code.
+`recovery/workspace-preservation/` contains 17 historical artifacts, including legacy design documents with OpenLivery references. Its README clearly labels the folder historical/non-authoritative and says not to use it as implementation source. The archive is not a substitute for current source code.
 
 **Decision:** preserve the archive for provenance; do not move/delete it in this pass. All future tooling/prompts must explicitly exclude `recovery/**` from implementation discovery unless the task is historical forensic review.
 
