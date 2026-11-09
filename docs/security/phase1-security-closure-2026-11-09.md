@@ -10,11 +10,11 @@ The complete API suite passed on commit `edb7b2d2e3102d001e14e4650cb0cdfa0722c11
 
 - Repository: `Pincodenovin13/m369-support`
 - Branch: `refactor/repository-structure-unification`
-- Commit: `fb57c3e24d071ecb807bc64a8be330400818b4c7`
+- Commit: `ad6e9024c6d6681c5da55490b0edd2a4296286fa`
 - Workflow: [API PostgreSQL security tests](https://github.com/Pincodenovin13/m369-support/actions/runs/42616889443)
 - Job: `postgres-tests` — completed successfully
 - Command: `pytest -q tests`
-- Result: **357 passed, 0 failed, 0 skipped, 1 warning**
+- Result: **358 passed, 0 failed, 0 skipped, 1 warning**
 - Runtime: 81.58 seconds; Python 3.12; PostgreSQL 16.15
 - Warning: Starlette TestClient uses the deprecated `anyio.abc.BlockingPortal` alias.
 
@@ -31,7 +31,7 @@ The complete API suite passed on commit `edb7b2d2e3102d001e14e4650cb0cdfa0722c11
 
 | Check | Status | Notes |
 |---|---|---|
-| Full test suite | PASS | 357 passed, 0 failed, 0 skipped |
+| Full test suite | PASS | 358 passed, 0 failed, 0 skipped |
 | Fix failures without weakening tests | PASS | No security tests removed or skipped |
 | Future tenant-table RLS guard | PASS | PostgreSQL catalog-driven guard for `agency_id` tables |
 | Cross-tenant CRUD attacks | PASS for exercised cases | Real PostgreSQL rows; SELECT/INSERT/UPDATE/DELETE |
