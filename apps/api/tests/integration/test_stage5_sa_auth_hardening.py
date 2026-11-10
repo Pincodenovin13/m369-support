@@ -980,7 +980,7 @@ def test_super_admin_token_rejected_by_tenant_api_routes(
     ]
     for path in paths:
         response = client.get(path, headers=_h(sa_token))
-        assert response.status_code == 401, (
-            f"Super Admin token crossed into tenant route {path}: "
+        assert response.status_code == 403, (
+            f"Super Admin token was not forbidden from tenant route {path}: "
             f"{response.status_code} {response.text}"
         )
